@@ -1,29 +1,17 @@
-# README #
+# Auto-Check-Web
 
-This README would normally document whatever steps are necessary to get your application up and running.
+[![E2E](https://github.com/PCThien-Ek/RateMate-AutoCheck/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/PCThien-Ek/RateMate-AutoCheck/actions/workflows/e2e.yml)
 
-### What is this repository for? ###
+## Yêu cầu
+- Docker (bắt buộc)
+- Make (tùy chọn, cho Linux/macOS/WSL; Windows có `make.ps1`)
 
-* Quick summary
-* Version
-* [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
+## Chuẩn bị
+```bash
+cp .env.example .env   # mở .env và điền BASE_URL_PROD, LOGIN_EMAIL, LOGIN_PASSWORD, ...
 
-### How do I get set up? ###
+## CI/CD
 
-* Summary of set up
-* Configuration
-* Dependencies
-* Database configuration
-* How to run tests
-* Deployment instructions
-
-### Contribution guidelines ###
-
-* Writing tests
-* Code review
-* Other guidelines
-
-### Who do I talk to? ###
-
-* Repo owner or admin
-* Other community or team contact
+- Workflow: `.github/workflows/e2e.yml`
+- Artifact báo cáo Excel được giữ **14 ngày**.
+- Khuyến nghị bảo vệ nhánh `main`: Require status check **“E2E”** trước khi merge.
