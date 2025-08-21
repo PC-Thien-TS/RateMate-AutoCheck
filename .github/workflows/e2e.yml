@@ -18,9 +18,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Tạo .env từ secrets/variables (không có staging)
+      # Tạo .env từ secrets/variables
       - name: Create .env
         run: |
           cat > .env <<'EOF'
@@ -36,15 +37,17 @@ jobs:
       - name: Build Docker image
         run: docker build -t ratemate-tests .
 
-      # Chạy test trong container, ghi Excel ra /out (được mount từ runner)
+      # Chạy test trong container, ghi report ra thư mục tạm /out (đã chmod để tránh lỗi Permission denied)
       - name: Run tests (chromium + webkit)
         env:
           TS: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          mkdir -p "$RUNNER_TEMP/e2e-report"
+          OUT="$RUNNER_TEMP/e2e-report"
+          mkdir -p "$OUT"
+          chmod 777 "$OUT"  # cho phép container ghi artifact
           docker run --rm --ipc=host --shm-size=1g \
             -v "${{ github.workspace }}:/app" \
-            -v "$RUNNER_TEMP/e2e-report:/out" \
+            -v "$OUT:/out" \
             --env-file .env \
             ratemate-tests \
             bash -lc "pytest -vv tests/auth tests/smoke/test_routes.py \
