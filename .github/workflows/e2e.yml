@@ -20,11 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Tạo .env từ secrets/variables
-      - name: Create .env
+      # Tạo .env cho PROD từ secrets/vars
+      - name: Create .env (prod only)
         run: |
           cat > .env <<'EOF'
-          ENV=${{ secrets.ENV }}
+          ENV=prod
           BASE_URL_PROD=${{ secrets.BASE_URL_PROD }}
           LOGIN_PATH=${{ vars.LOGIN_PATH || '/en/login' }}
           REGISTER_PATH=${{ vars.REGISTER_PATH || '/en/login' }}
@@ -32,25 +32,34 @@ jobs:
           LOGIN_PASSWORD=${{ secrets.LOGIN_PASSWORD }}
           LOCALES=${{ vars.LOCALES || 'en' }}
           EOF
+          echo "Generated .env:"
+          sed -E 's/(LOGIN_EMAIL|LOGIN_PASSWORD)=.*/\1=***masked***/' .env | sed -E 's/(BASE_URL_PROD)=.*/\1=***masked***/'
 
       - name: Build Docker image
         run: docker build -t ratemate-tests .
 
-      # Chạy test trong container, ghi report ra thư mục tạm /out
+      # Thư mục report có quyền ghi (tránh PermissionError)
+      - name: Prepare report dir (writable)
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e-report"
+          chmod -R 777 "$RUNNER_TEMP/e2e-report"
+          ls -ld "$RUNNER_TEMP" "$RUNNER_TEMP/e2e-report"
+
+      # Chạy test trong container, ghi Excel ra /out (đã mount)
       - name: Run tests (chromium + webkit)
         env:
           TS: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          mkdir -p "$RUNNER_TEMP/e2e-report"
           docker run --rm --ipc=host --shm-size=1g \
+            -u $(id -u):$(id -g) \
             -v "${{ github.workspace }}:/app" \
             -v "$RUNNER_TEMP/e2e-report:/out" \
             --env-file .env \
             ratemate-tests \
-            bash -lc "pytest -vv tests/auth tests/smoke/test_routes.py \
+            bash -lc 'pytest -vv tests/auth tests/smoke/test_routes.py \
               --browser=chromium --browser=webkit \
               --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-              --excelreport=/out/smoke-${TS}.xlsx"
+              --excelreport=/out/smoke-${TS}.xlsx'
 
       - name: Upload Excel report
         if: always()
