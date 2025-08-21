@@ -1,0 +1,8 @@
+.git
+__pycache__/
+.pytest_cache/
+report/
+*.xlsx
+*.log
+.env
+node_modules/
