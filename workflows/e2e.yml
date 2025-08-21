@@ -1,0 +1,78 @@
+name: E2E
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 */2 * * *"   # smoke mỗi 2 giờ (UTC)
+    - cron: "0 18 * * *"    # full ban đêm (UTC ~ 01:00+07)
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env from secrets
+        run: |
+          cat > .env <<'EOF'
+          BASE_URL_PROD=${{ secrets.BASE_URL_PROD }}
+          LOCALES=en,vi
+          TEST_USER_EMAIL=${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD=${{ secrets.TEST_USER_PASSWORD }}
+          EOF
+
+      - name: Build docker image
+        run: docker build -t ratemate-tests -f Dockerfile .
+
+      - name: Run smoke (chromium+webkit)
+        run: |
+          mkdir -p report
+          ts=$(date +%Y%m%d-%H%M%S)
+          docker run --rm -t --ipc=host --shm-size=1g \
+            -v "${PWD}:/app" --env-file .env ratemate-tests \
+            pytest -vv tests/auth tests/smoke/test_routes.py \
+            --browser=chromium --browser=webkit \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --excelreport="report/smoke-$ts.xlsx"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-artifacts
+          path: |
+            report/**
+            test-results/**
+          if-no-files-found: warn
+
+  full-nightly:
+    if: github.event_name == 'schedule' && startsWith(github.event.schedule, '0 18')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cat > .env <<'EOF'
+          BASE_URL_PROD=${{ secrets.BASE_URL_PROD }}
+          LOCALES=en,vi
+          TEST_USER_EMAIL=${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD=${{ secrets.TEST_USER_PASSWORD }}
+          EOF
+      - run: docker build -t ratemate-tests -f Dockerfile .
+      - run: |
+          mkdir -p report
+          ts=$(date +%Y%m%d-%H%M%S)
+          docker run --rm -t --ipc=host --shm-size=1g \
+            -v "${PWD}:/app" --env-file .env ratemate-tests \
+            pytest -vv tests \
+            --browser=chromium --browser=firefox --browser=webkit \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --excelreport="report/run-$ts.xlsx"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-artifacts
+          path: |
+            report/**
+            test-results/**
