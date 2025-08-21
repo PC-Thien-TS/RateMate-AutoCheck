@@ -3,76 +3,59 @@ name: E2E
 on:
   push:
     branches: [ main ]
+    paths:
+      - '**.py'
+      - 'tests/**'
+      - 'Dockerfile'
+      - '.github/workflows/e2e.yml'
+      - 'requirements*'
   pull_request:
     branches: [ main ]
-  workflow_dispatch: {}
-  schedule:
-    - cron: "0 */2 * * *"   # smoke mỗi 2 giờ (UTC)
-    - cron: "0 18 * * *"    # full ban đêm (UTC ~ 01:00+07)
+  workflow_dispatch:
 
 jobs:
-  smoke:
+  e2e:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Write .env from secrets
+      # Tạo .env từ secrets/variables
+      - name: Create .env
         run: |
           cat > .env <<'EOF'
+          ENV=${{ secrets.ENV }}
           BASE_URL_PROD=${{ secrets.BASE_URL_PROD }}
-          LOCALES=en,vi
-          TEST_USER_EMAIL=${{ secrets.TEST_USER_EMAIL }}
-          TEST_USER_PASSWORD=${{ secrets.TEST_USER_PASSWORD }}
+          LOGIN_PATH=${{ vars.LOGIN_PATH || '/en/login' }}
+          REGISTER_PATH=${{ vars.REGISTER_PATH || '/en/login' }}
+          LOGIN_EMAIL=${{ secrets.LOGIN_EMAIL }}
+          LOGIN_PASSWORD=${{ secrets.LOGIN_PASSWORD }}
+          LOCALES=${{ vars.LOCALES || 'en' }}
           EOF
 
-      - name: Build docker image
-        run: docker build -t ratemate-tests -f Dockerfile .
+      - name: Build Docker image
+        run: docker build -t ratemate-tests .
 
-      - name: Run smoke (chromium+webkit)
+      # Chạy test trong container, ghi report ra thư mục tạm /out
+      - name: Run tests (chromium + webkit)
+        env:
+          TS: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          mkdir -p report
-          ts=$(date +%Y%m%d-%H%M%S)
-          docker run --rm -t --ipc=host --shm-size=1g \
-            -v "${PWD}:/app" --env-file .env ratemate-tests \
-            pytest -vv tests/auth tests/smoke/test_routes.py \
-            --browser=chromium --browser=webkit \
-            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-            --excelreport="report/smoke-$ts.xlsx"
+          mkdir -p "$RUNNER_TEMP/e2e-report"
+          docker run --rm --ipc=host --shm-size=1g \
+            -v "${{ github.workspace }}:/app" \
+            -v "$RUNNER_TEMP/e2e-report:/out" \
+            --env-file .env \
+            ratemate-tests \
+            bash -lc "pytest -vv tests/auth tests/smoke/test_routes.py \
+              --browser=chromium --browser=webkit \
+              --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+              --excelreport=/out/smoke-${TS}.xlsx"
 
-      - name: Upload artifacts
+      - name: Upload Excel report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-artifacts
-          path: |
-            report/**
-            test-results/**
+          name: e2e-report
+          path: ${{ runner.temp }}/e2e-report/*.xlsx
           if-no-files-found: warn
-
-  full-nightly:
-    if: github.event_name == 'schedule' && startsWith(github.event.schedule, '0 18')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          cat > .env <<'EOF'
-          BASE_URL_PROD=${{ secrets.BASE_URL_PROD }}
-          LOCALES=en,vi
-          TEST_USER_EMAIL=${{ secrets.TEST_USER_EMAIL }}
-          TEST_USER_PASSWORD=${{ secrets.TEST_USER_PASSWORD }}
-          EOF
-      - run: docker build -t ratemate-tests -f Dockerfile .
-      - run: |
-          mkdir -p report
-          ts=$(date +%Y%m%d-%H%M%S)
-          docker run --rm -t --ipc=host --shm-size=1g \
-            -v "${PWD}:/app" --env-file .env ratemate-tests \
-            pytest -vv tests \
-            --browser=chromium --browser=firefox --browser=webkit \
-            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-            --excelreport="report/run-$ts.xlsx"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: full-artifacts
-          path: |
-            report/**
-            test-results/**
