@@ -21,7 +21,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Tạo .env từ secrets/variables
       - name: Create .env
         run: |
           cat > .env <<'EOF'
@@ -37,17 +36,17 @@ jobs:
       - name: Build Docker image
         run: docker build -t ratemate-tests .
 
-      # Chạy test trong container, ghi report ra thư mục tạm /out (đã chmod để tránh lỗi Permission denied)
       - name: Run tests (chromium + webkit)
         env:
           TS: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           OUT="$RUNNER_TEMP/e2e-report"
           mkdir -p "$OUT"
-          chmod 777 "$OUT"  # cho phép container ghi artifact
+          chmod 777 "$OUT"
           docker run --rm --ipc=host --shm-size=1g \
             -v "${{ github.workspace }}:/app" \
             -v "$OUT:/out" \
+            -e ARTIFACT_DIR=/out \
             --env-file .env \
             ratemate-tests \
             bash -lc "pytest -vv tests/auth tests/smoke/test_routes.py \
