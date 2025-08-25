@@ -1,0 +1,22 @@
+default_site: ratemate
+
+sites:
+  ratemate:
+    base_url: https://store.ratemate.top
+    login_path: /en/login
+    register_path: /en/login
+    locales: [en]
+    credentials:
+      email: tramhtk20.jobs@gmail.com      # điền thật (hoặc để trống nếu dùng secrets)
+      password: 12345678
+    routes: [/en/login, /en/store, /en/product, /en/QR]
+
+  newweb:                # ví dụ site 2
+    base_url: http://192.168.1.7:19070
+    login_path: /sign-in
+    register_path: /sign-up
+    locales: [en, vi]
+    credentials:
+      email: user@example.com
+      password: secret
+    routes: [/auth/login, /home, /products, /qrcode]
