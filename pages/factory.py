@@ -1,7 +1,18 @@
 # pages/factory.py
-import os
-
-SITE = (os.getenv("SITE") or "").strip().lower()
-
 from .auth.login_page import LoginPage
-from .register_page_site2 import RegisterPageSite2 as RegisterPage
+from .auth.register_page import RegisterPage  # <— nay import từ auth
+
+class PageFactory:
+    def __init__(self, page, site_cfg: dict):
+        self.page = page
+        self.cfg = site_cfg
+
+    def login(self) -> LoginPage:
+        return LoginPage(self.page, self.cfg["base_url"],
+                         self.cfg.get("login_path", "/en/login"))
+
+    def register(self) -> RegisterPage:
+        return RegisterPage(self.page, self.cfg["base_url"],
+                            self.cfg.get("register_path", "/en/login"))
+
+__all__ = ["LoginPage", "RegisterPage", "PageFactory"]

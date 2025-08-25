@@ -10,10 +10,12 @@ from playwright.sync_api import Page, Locator
 class ResponseLike:
     def __init__(self, status: Optional[int] = None, url: str = "", body: str = ""):
         self._status = status
+        # property-style access: resp.status
         self.status = status
         self.url = url
         self._body = body
 
+    # method-style access: resp.status()
     def status(self) -> Optional[int]:
         return self._status
 
@@ -149,23 +151,31 @@ def _submit_union(scope: Union[Page, Locator]) -> Locator:
     return by_role.or_(css_plain).or_(css_ionic)
 
 def _error_union(scope: Union[Page, Locator]) -> Locator:
-    # Phủ nhiều UI lib + Ionic (shadow DOM)
-    return scope.locator(
-        "css="
-        # tiêu chuẩn/aria
-        "[role='alert'], [aria-live='assertive'], .invalid-feedback, .form-error, .error, .error-message, "
-        ".text-danger, .text-red-500, .text-red-600, span.help-block, .help.is-danger, "
-        # Ant Design
-        ".ant-form-item-explain-error, .ant-alert-message, .ant-message-notice .ant-message-custom-content, .ant-notification-notice-description, "
-        # Material / Chakra / MUI / Prime
-        "mat-error, .mat-mdc-form-field-error, .MuiAlert-message, .chakra-alert, .p-message .p-message-text, .v-alert__content, .el-message__content, "
+    """
+    Selector bắt thông điệp lỗi theo nhiều UI lib.
+    LƯU Ý: KHÔNG dùng ::part(...) hoặc >>> để tránh lỗi parser (đặc biệt WebKit).
+    Chỉ nhận diện 'ion-toast'/'ion-alert' ở mức thô; không đọc sâu shadow DOM ở đây.
+    """
+    # Gom nhóm theo từng chuỗi CSS "an toàn"
+    groups = [
+        # tiêu chuẩn/aria/generic
+        "[role='alert'], [aria-live='assertive']",
+        ".invalid-feedback, .form-error",
+        ".error, .error-message, .text-danger, .text-red-500, .text-red-600",
+        "span.help-block, .help.is-danger",
+        # Ant Design / notifications
+        ".ant-form-item-explain-error, .ant-alert-message, .ant-message-notice .ant-message-custom-content, .ant-notification-notice-description",
+        # Material / Chakra / MUI / Prime / others
+        "mat-error, .mat-mdc-form-field-error, .MuiAlert-message, .chakra-alert, .p-message .p-message-text, .v-alert__content, .el-message__content",
         # Toast / Notification phổ biến
-        ".toast-message, .notification-message, "
-        # Ionic (dùng ::part + shadow)
-        "ion-note[color='danger'], ion-text[color='danger'], "
-        "ion-toast::part(message), ion-alert::part(message), "
-        "ion-toast >>> .toast-message, ion-alert >>> .alert-message"
-    )
+        ".toast-message, .notification-message",
+        # Ionic (chỉ phát hiện component, KHÔNG ::part / >>>)
+        "ion-note[color='danger'], ion-text[color='danger'], ion-toast, ion-alert",
+    ]
+    loc = scope.locator("css=" + groups[0])
+    for g in groups[1:]:
+        loc = loc.or_(scope.locator("css=" + g))
+    return loc
 
 def _fallback_any_textbox(scope: Union[Page, Locator], page: Page) -> Locator:
     ionic_inner = scope.locator("css=ion-input >>> input, ion-textarea >>> textarea, ion-item input, ion-item textarea")
@@ -233,10 +243,10 @@ class LoginPage:
 
     # ---------- error helpers ----------
     def visible_error_locator(self) -> Locator:
-        # Trả về locator tổng hợp các khả năng hiển thị lỗi (đã lọc visible)
+        # locator tổng hợp các khả năng hiển thị lỗi (đÃ loại ::part/>>>)
         union = _error_union(self.page)
         try:
-            # Ưu tiên phần tử đang visible
+            # ưu tiên phần tử có text
             vis = union.filter(has_text=re.compile(r".+")).first
             if vis and vis.count() > 0:
                 return vis
@@ -258,6 +268,10 @@ class LoginPage:
                 pass
             self.page.wait_for_timeout(150)
         return text
+
+    # Back-compat alias cho test khác phiên bản
+    def visible_error_text(self, timeout: int = 4000) -> str:
+        return self.error_text(timeout_ms=timeout)
 
     # ---------- actions ----------
     def login(self, email: str, password: str, wait_response_ms: int = 15000) -> ResponseLike:
