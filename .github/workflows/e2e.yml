@@ -19,19 +19,24 @@ jobs:
       BASE_URL_PROD: https://store.ratemate.top
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
-      JUNIT_XML: report/junit.xml
+      # đường dẫn JUnit bên TRONG container (đi kèm volume)
+      JUNIT_XML: /app/report/junit.xml
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Prepare report dir
+        run: mkdir -p report
+
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium)
+      - name: Run tests (Chromium) -> write JUnit directly to host via volume
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
-            -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
+            -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH -e JUNIT_XML \
+            -v "$PWD/report:/app/report" \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
@@ -41,15 +46,11 @@ jobs:
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
                 -o junit_family=xunit2 --junitxml=\$JUNIT_XML || true"
-
-      - name: Copy report out
-        run: |
-          mkdir -p report
-          docker cp ratemate_e2e:/app/report ./report || true
-          docker rm -f ratemate_e2e 2>/dev/null || true
           ls -la report || true
+          # không cần docker cp nữa
+          docker rm -f ratemate_e2e 2>/dev/null || true
 
-      # === FIX QUAN TRỌNG: ghi output qua $GITHUB_OUTPUT ===
+      # === Parse JUnit -> output (ghi đúng cách qua $GITHUB_OUTPUT) ===
       - name: Parse JUnit → summary
         id: sum
         run: |
@@ -60,23 +61,26 @@ jobs:
           if p.exists():
               t = ET.parse(p).getroot()
               ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-              def g(a): return int(ts.get(a, "0"))
-              out = {
-                  "total": g("tests"),
-                  "fail": g("failures"),
-                  "error": g("errors"),
-                  "skip": g("skipped"),
-                  "duration": float(ts.get("time","0")),
-                  "fails": [],
-              }
-              for tc in ts.findall(".//testcase"):
-                  fe = tc.find("failure") or tc.find("error")
-                  if fe is not None:
-                      name = f"{tc.get('classname','')}.{tc.get('name')}"
-                      msg  = (fe.get("message") or "").strip()
-                      txt  = (fe.text or "").strip()
-                      out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
-          # ghi ra output
+              if ts is not None:
+                  def g(a): return int(ts.get(a, "0"))
+                  out = {
+                      "total": g("tests"),
+                      "fail": g("failures"),
+                      "error": g("errors"),
+                      "skip": g("skipped"),
+                      "duration": float(ts.get("time","0")),
+                      "fails": [],
+                  }
+                  for tc in ts.findall(".//testcase"):
+                      fe = tc.find("failure") or tc.find("error")
+                      if fe is not None:
+                          name = f"{tc.get('classname','')}.{tc.get('name')}"
+                          msg  = (fe.get("message") or "").strip()
+                          txt  = (fe.text or "").strip()
+                          out["fails"].append({
+                              "name": name,
+                              "reason": (msg or txt or "No message")[:400]
+                          })
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write("summary_json<<EOF\n")
               fh.write(json.dumps(out, ensure_ascii=False))
@@ -93,24 +97,26 @@ jobs:
         run: |
           python - <<'PY'
           import os, json, subprocess, xml.etree.ElementTree as ET, pathlib
-          # lấy summary từ output; nếu trống thì đọc lại junit.xml (fallback)
           raw = os.getenv("SUMMARY_JSON") or ""
           d = json.loads(raw) if raw else {}
+          # Fallback: đọc lại report/junit.xml trên host nếu output rỗng
           if not d:
               p = pathlib.Path("report/junit.xml")
               if p.exists():
                   t = ET.parse(p).getroot()
                   ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-                  def g(a): return int(ts.get(a,"0"))
-                  d = {"total": g("tests"), "fail": g("failures"), "error": g("errors"),
-                       "skip": g("skipped"), "duration": float(ts.get("time","0")), "fails":[]}
-                  for tc in ts.findall(".//testcase"):
-                      fe = tc.find("failure") or tc.find("error")
-                      if fe is not None:
-                          name=f"{tc.get('classname','')}.{tc.get('name')}"
-                          msg=(fe.get('message') or '').strip()
-                          txt=(fe.text or '').strip()
-                          d["fails"].append({"name":name,"reason":(msg or txt or 'No message')[:400]})
+                  if ts is not None:
+                      def g(a): return int(ts.get(a,"0"))
+                      d = {"total": g("tests"), "fail": g("failures"), "error": g("errors"),
+                           "skip": g("skipped"), "duration": float(ts.get("time","0")), "fails":[]}
+                      for tc in ts.findall(".//testcase"):
+                          fe = tc.find("failure") or tc.find("error")
+                          if fe is not None:
+                              name=f"{tc.get('classname','')}.{tc.get('name')}"
+                              msg=(fe.get('message') or '').strip()
+                              txt=(fe.text or '').strip()
+                              d["fails"].append({"name":name,"reason":(msg or txt or 'No message')[:400]})
+
           total=d.get("total",0); fail=d.get("fail",0); err=d.get("error",0); skip=d.get("skip",0); dur=d.get("duration",0.0)
           status = "✅" if fail==0 and err==0 else "❌"
           lines = [
@@ -124,13 +130,12 @@ jobs:
               for f in d["fails"][:10]:
                   lines.append(f"• {f['name']}")
                   lines.append(f"  └─ {f['reason']}")
-          text = "\n".join(lines)
 
+          text = "\n".join(lines)
           token = os.environ["TELEGRAM_BOT_TOKEN"]
           chat  = os.environ["TELEGRAM_CHAT_ID"]
           url   = f"https://api.telegram.org/bot{token}/sendMessage"
           payload = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-
           args = ["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload, ensure_ascii=False)]
           if os.getenv("TELEGRAM_PROXY"):
               args[1:1] = ["-x", os.environ["TELEGRAM_PROXY"]]
