@@ -2,8 +2,27 @@ name: E2E
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   
-  workflow_dispatch: {}
+    - cron: "*/10 * * * *" # 10 phút/lần
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "ENV"
+        type: choice
+        options: [prod, staging]
+        default: prod
+      base_url:
+        description: "Override BASE_URL (optional)"
+        type: string
+        default: ""
+      browsers:
+        description: "Browsers"
+        type: choice
+        options: ["chromium", "chromium+webkit"]
+        default: "chromium"
+      notify_on_success:
+        description: "Always notify even if success?"
+        type: boolean
+        default: true
 
 concurrency:
   group: e2e
@@ -12,174 +31,252 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     env:
       SITE: ratemate
-      ENV: prod
-      BASE_URL_PROD: https://store.ratemate.top
+      ENV: ${{ inputs.env || 'prod' }}
+      BASE_URL_PROD: ${{ inputs.base_url != '' && inputs.base_url || 'https://store.ratemate.top' }}
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
-      # Ghi file trong container ở đường dẫn tuyệt đối để dễ copy ra
-      JUNIT_XML:  /app/report/junit.xml
-      REPORT_HTML: /app/report/e2e.html
+      JUNIT_XML: report/junit.xml
+      # map secrets cũ -> test dùng E2E_*
+      E2E_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build test image
-        run: docker build -t ratemate-tests .
+      # ===== Build cache để tăng tốc =====
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Run tests (Chromium)
-        env:
-          # truyền tài khoản thật để login_success không bị skip
-          E2E_EMAIL:     ${{ secrets.E2E_EMAIL }}
-          E2E_PASSWORD:  ${{ secrets.E2E_PASSWORD }}
+      - name: Build test image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ratemate-tests:latest
+          load: true              # load vào local engine để run
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ===== Health check base URL (fail nhanh nếu site down) =====
+      - name: Health check
+        run: |
+          set -e
+          URL="${{ inputs.base_url != '' && inputs.base_url || 'https://store.ratemate.top' }}"
+          echo "Checking $URL ..."
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 15 "$URL")
+          echo "HTTP $code"
+          if [ "$code" -lt 200 ] || [ "$code" -ge 500 ]; then
+            echo "Site not healthy"; exit 1
+          fi
+
+      # ===== chạy Chromium; thêm WebKit nếu chọn =====
+      - name: Run tests in container
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
+
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
             -e E2E_EMAIL -e E2E_PASSWORD \
-            -e JUNIT_XML -e REPORT_HTML \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
                 --browser=chromium \
+                --reruns 1 --reruns-delay 2 \
+                -n auto \
                 -p no:pytest_excel \
                 -o cache_dir=/tmp/pytest_cache \
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-                -o junit_family=xunit2 --junitxml=\$JUNIT_XML \
-                --html=\$REPORT_HTML --self-contained-html || true"
+                --html=/app/report/e2e.html --self-contained-html \
+                -o junit_family=xunit2 --junitxml=\$JUNIT_XML || true"
 
-      - name: Copy report out (flatten, no nesting)
-        if: always()
+          if [ "${{ inputs.browsers }}" = "chromium+webkit" ]; then
+            docker exec -t ratemate_e2e bash -lc \
+              "pytest -vv tests/auth tests/smoke/test_routes.py \
+                --browser=webkit \
+                --reruns 1 --reruns-delay 2 \
+                -n auto \
+                -p no:pytest_excel \
+                -o cache_dir=/tmp/pytest_cache \
+                --output=/tmp/test-results \
+                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+                --html=/app/report/e2e-wk.html --self-contained-html \
+                -o junit_family=xunit2 --junitxml=\$JUNIT_XML.wk || true"
+          fi
+
+      - name: Pull artifacts
         run: |
           mkdir -p report
-          # Dấu '/.' để copy NỘI DUNG thư mục /app/report ra ./report
-          docker cp ratemate_e2e:/app/report/. ./report || true
+          docker cp ratemate_e2e:/app/report ./report || true
+          docker cp ratemate_e2e:/tmp/test-results ./report/test-results || true
           docker rm -f ratemate_e2e 2>/dev/null || true
-          echo "== ls report =="
-          ls -la report || true
+
+          # zip trace + screenshot nếu có
+          if ls report/test-results/*/* 1>/dev/null 2>&1; then
+            cd report
+            zip -qr fail-artifacts.zip test-results -i '*trace.zip' -i '*.png' -i '*.webm' || true
+            cd ..
+          fi
+
+      # ===== lưu/đọc trạng thái lần trước để hạn chế spam =====
+      - name: Restore e2e state
+        id: st
+        uses: actions/cache/restore@v4
+        with:
+          path: .e2e-state.json
+          key: e2e-state
 
       - name: Parse JUnit → summary
         id: sum
-        if: always()
         run: |
           python - <<'PY'
           import os, json, pathlib, xml.etree.ElementTree as ET
-          out = {}
-          p = pathlib.Path("report/junit.xml")
-          if p.exists():
-              t = ET.parse(p).getroot()
-              ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-              def g(a): return int(ts.get(a, "0"))
-              out = {
-                  "total": g("tests"),
-                  "fail": g("failures"),
-                  "error": g("errors"),
-                  "skip": g("skipped"),
-                  "duration": float(ts.get("time","0")),
-                  "fails": [],
-              }
-              for tc in ts.findall(".//testcase"):
-                  fe = tc.find("failure") or tc.find("error")
-                  if fe is not None:
-                      name = f"{tc.get('classname','')}.{tc.get('name')}"
-                      msg  = (fe.get("message") or "").strip()
-                      txt  = (fe.text or "").strip()
-                      out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
-          # Xuất ra output cho bước sau
+
+          def parse_one(p):
+            p = pathlib.Path(p)
+            if not p.exists(): return None
+            t = ET.parse(p).getroot()
+            ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
+            if ts is None: return None
+            gi = lambda k: int(ts.get(k,"0"))
+            data = dict(total=gi("tests"), fail=gi("failures"), error=gi("errors"),
+                        skip=gi("skipped"), duration=float(ts.get("time","0")), fails=[])
+            for tc in ts.findall(".//testcase"):
+              fe = tc.find("failure") or tc.find("error")
+              if fe is not None:
+                name=f"{tc.get('classname','')}.{tc.get('name')}"
+                msg=(fe.get('message') or '').strip()
+                txt=(fe.text or '').strip()
+                data["fails"].append({"name":name,"reason":(msg or txt or 'No message')[:400]})
+            return data
+
+          merged = {"total":0,"fail":0,"error":0,"skip":0,"duration":0.0,"fails":[]}
+          for fn in ("report/junit.xml","report/junit.xml.wk"):
+            d = parse_one(fn)
+            if not d: continue
+            for k in ("total","fail","error","skip"): merged[k]+=d[k]
+            merged["duration"] += d["duration"]
+            merged["fails"].extend(d["fails"])
+
+          # ghi output
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write("summary_json<<EOF\n")
-              fh.write(json.dumps(out, ensure_ascii=False))
-              fh.write("\nEOF\n")
+            fh.write("summary_json<<EOF\n")
+            fh.write(json.dumps(merged, ensure_ascii=False))
+            fh.write("\nEOF\n")
+
+          # viết GitHub Job Summary
+          t=merged; passed=t["total"]-t["fail"]-t["error"]-t["skip"]
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as f:
+            f.write(f"**E2E:** {t['total']} tests | ✅ {passed}  ❌ {t['fail']}  🧨 {t['error']}  ⏭ {t['skip']}  in ~{t['duration']:.1f}s\n")
+            if t["fails"]:
+              f.write("\n<details><summary>Failed cases</summary>\n\n")
+              for x in t["fails"]:
+                f.write(f"- **{x['name']}**<br/> ↳ {x['reason']}\n")
+              f.write("\n</details>\n")
           PY
 
-      - name: Send Telegram (message + report file)
+      - name: Send Telegram (message + html + fail bundle + ảnh preview)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+          TELEGRAM_PING_IDS:  ${{ secrets.TELEGRAM_PING_IDS }}
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
+          NOTIFY_ON_SUCCESS:  ${{ inputs.notify_on_success }}
         run: |
           python - <<'PY'
-          import os, json, subprocess, xml.etree.ElementTree as ET, pathlib
+          import os, json, subprocess, pathlib, glob
 
-          # ===== compose text =====
-          raw = os.getenv("SUMMARY_JSON") or ""
-          d = json.loads(raw) if raw else {}
-          if not d:
-              p = pathlib.Path("report/junit.xml")
-              if p.exists():
-                  t = ET.parse(p).getroot()
-                  ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-                  def g(a): return int(ts.get(a,"0"))
-                  d = {"total": g("tests"), "fail": g("failures"), "error": g("errors"),
-                       "skip": g("skipped"), "duration": float(ts.get("time","0")), "fails":[]}
-                  for tc in ts.findall(".//testcase"):
-                      fe = tc.find("failure") or tc.find("error")
-                      if fe is not None:
-                          name=f"{tc.get('classname','')}.{tc.get('name')}"
-                          msg=(fe.get('message') or '').strip()
-                          txt=(fe.text or '').strip()
-                          d["fails"].append({"name":name,"reason":(msg or txt or 'No message')[:400]})
+          # đọc summary
+          d = json.loads(os.getenv("SUMMARY_JSON") or "{}")
           total=d.get("total",0); fail=d.get("fail",0); err=d.get("error",0); skip=d.get("skip",0); dur=d.get("duration",0.0)
-          status = "✅" if fail==0 and err==0 else "❌"
-          lines = [
-              f"{status} E2E Result: {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}",
+          passed = total-fail-err-skip
+          status_ok = (fail==0 and err==0)
+
+          # đọc trạng thái cũ
+          prev = {"ok": True}
+          st_file = pathlib.Path(".e2e-state.json")
+          if st_file.exists():
+            try: prev.update(json.loads(st_file.read_text("utf-8")))
+            except: pass
+
+          # quyết định có gửi không
+          notify_on_success = (os.getenv("NOTIFY_ON_SUCCESS","true").lower()=="true")
+          send_now = (not status_ok) or notify_on_success or (prev.get("ok") != status_ok)
+
+          if not send_now:
+            print("Skip Telegram (no change).")
+          else:
+            status = "✅" if status_ok else "❌"
+            lines=[]
+            if not status_ok:
+              pings = [s.strip() for s in (os.getenv("TELEGRAM_PING_IDS","") or "").split(",") if s.strip()]
+              if pings:
+                ping_txt = " ".join([f'<a href="tg://user?id={pid}">&#8203;</a>' for pid in pings])
+                lines.append(f"⚠️ E2E failing {ping_txt}")
+            lines += [
+              f"{status} E2E Result: {total} tests | pass={passed} fail={fail} error={err} skip={skip}",
               f"Duration: ~{dur:.1f}s",
               f"Run: {os.getenv('GITHUB_SERVER_URL','')}/{os.getenv('GITHUB_REPOSITORY','')}/actions/runs/{os.getenv('GITHUB_RUN_ID','')}",
-          ]
-          if d.get("fails"):
+            ]
+            if d.get("fails"):
               lines.append("")
               lines.append("❗ Failed cases:")
               for f in d["fails"][:10]:
-                  lines.append(f"• {f['name']}")
-                  lines.append(f"  └─ {f['reason']}")
-          text = "\n".join(lines)
+                lines.append(f"• {f['name']}")
+                lines.append(f"  └─ {f['reason']}")
 
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat  = os.environ["TELEGRAM_CHAT_ID"]
-          proxy = os.getenv("TELEGRAM_PROXY")
+            text = "\n".join(lines)
+            token=os.environ["TELEGRAM_BOT_TOKEN"]; chat=os.environ["TELEGRAM_CHAT_ID"]; proxy=os.getenv("TELEGRAM_PROXY")
+            # send text
+            url=f"https://api.telegram.org/bot{token}/sendMessage"
+            payload={"chat_id":chat,"text":text,"parse_mode":"HTML","disable_web_page_preview":True}
+            args=["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload, ensure_ascii=False)]
+            if proxy: args[1:1]=["-x",proxy]
+            print("Telegram(text)...")
+            print(subprocess.run(args+[url],capture_output=True,text=True).stdout)
 
-          # ===== 1) sendMessage =====
-          url_msg   = f"https://api.telegram.org/bot{token}/sendMessage"
-          payload_m = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-          args_m = ["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload_m, ensure_ascii=False)]
-          if proxy: args_m[1:1] = ["-x", proxy]
-          args_m.append(url_msg)
-          res_m = subprocess.run(args_m, capture_output=True, text=True)
-          print("Telegram message:", res_m.stdout or res_m.stderr)
+            # send HTML report(s)
+            def send_doc(path, caption):
+              if not pathlib.Path(path).exists(): return
+              url=f"https://api.telegram.org/bot{token}/sendDocument"
+              up=["curl","-sS","-m","120","-X","POST","-F",f"chat_id={chat}","-F",f"caption={caption}","-F",f"document=@{path}"]
+              if proxy: up[1:1]=["-x",proxy]
+              print(f"Telegram(doc:{path})...")
+              print(subprocess.run(up+[url],capture_output=True,text=True).stdout)
 
-          # ===== 2) sendDocument (HTML report) =====
-          # Ưu tiên e2e.html; nếu không có thì chọn file *.html bất kỳ trong report/
-          report = pathlib.Path("report/e2e.html")
-          if not report.exists():
-              for cand in sorted(pathlib.Path("report").glob("*.html")):
-                  report = cand
-                  break
+            send_doc("report/e2e.html", f"E2E report • {total} tests | pass={passed} fail={fail} error={err} skip={skip}")
+            send_doc("report/e2e-wk.html", "E2E WebKit report")
 
-          if report.exists():
-              url_doc = f"https://api.telegram.org/bot{token}/sendDocument"
-              caption = f"E2E report • {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}"
-              # multipart/form-data
-              args_d = ["curl","-sS","-m","120","-X","POST",
-                        "-F", f"chat_id={chat}",
-                        "-F", f"caption={caption}",
-                        "-F", f"document=@{report.as_posix()}"]
-              if proxy: args_d[1:1] = ["-x", proxy]
-              args_d.append(url_doc)
-              res_d = subprocess.run(args_d, capture_output=True, text=True)
-              print("Telegram document:", res_d.stdout or res_d.stderr)
-          else:
-              print("No HTML report found to send.")
+            # nếu fail: gửi bundle + 1 ảnh PNG đầu tiên làm preview
+            if not status_ok:
+              send_doc("report/fail-artifacts.zip", f"E2E fail artifacts • {fail+err} failing test(s)")
+              pngs = sorted(glob.glob("report/test-results/**/*.png", recursive=True))
+              if pngs:
+                url=f"https://api.telegram.org/bot{token}/sendPhoto"
+                up=["curl","-sS","-m","60","-X","POST","-F",f"chat_id={chat}","-F",f"caption=First failure screenshot","-F",f"photo=@{pngs[0]}"]
+                if proxy: up[1:1]=["-x",proxy]
+                print("Telegram(photo)...")
+                print(subprocess.run(up+[url],capture_output=True,text=True).stdout)
 
+          # cập nhật trạng thái mới & save vào cache
+          st_file.write_text(json.dumps({"ok": status_ok}), encoding="utf-8")
           PY
 
-      - name: Upload HTML report (artifact)
+      - name: Save e2e state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .e2e-state.json
+          key: e2e-state
+
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-report
           path: report/
+          retention-days: 7
