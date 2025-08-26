@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+import contextlib
 from typing import Optional, Union
 from playwright.sync_api import Page, Locator
 
@@ -10,12 +11,10 @@ from playwright.sync_api import Page, Locator
 class ResponseLike:
     def __init__(self, status: Optional[int] = None, url: str = "", body: str = ""):
         self._status = status
-        # property-style access: resp.status
-        self.status = status
         self.url = url
         self._body = body
 
-    # method-style access: resp.status()
+    @property
     def status(self) -> Optional[int]:
         return self._status
 
@@ -81,24 +80,13 @@ def _pick_visible(raw: Locator, page: Page, timeout_ms: int = 9000, scan_limit: 
 
 def _fill_any(page: Page, loc: Locator, value: str) -> None:
     loc = _as_fillable(loc)
-    try:
-        loc.click(timeout=1500)
-    except Exception:
-        pass
-    try:
-        loc.fill("", timeout=1500)
-    except Exception:
-        pass
-    try:
-        loc.fill(value, timeout=2000)
-        return
-    except Exception:
-        pass
-    try:
-        loc.type(value, timeout=2000)
-        return
-    except Exception:
-        pass
+    for fn, arg in (("click", None), ("fill", ""), ("fill", value), ("type", value)):
+        try:
+            getattr(loc, fn)(*((),)[0] if arg is None else (arg,), timeout=2000)
+            if fn in ("fill", "type") and arg == value:
+                return
+        except Exception:
+            pass
     try:
         handle = loc.element_handle(timeout=1500)
         if handle:
@@ -132,44 +120,44 @@ def _password_union(scope: Union[Page, Locator]) -> Locator:
     patt = r"(mật\s*khẩu|password|pass|pwd)"
     by_label = scope.get_by_label(re.compile(patt, re.IGNORECASE))
     by_placeholder = scope.get_by_placeholder(re.compile(patt, re.IGNORECASE))
-    by_role = scope.get_by_role("textbox", name=re.compile(patt, re.IGNORECASE))
     css_plain = scope.locator(
         "css=input[type='password'], "
         "input[id*='pass' i], input[name*='pass' i], "
         "input[autocomplete*='current-password' i], input[autocomplete*='password' i]"
     )
     css_ionic = scope.locator("css=ion-input, ion-textarea")
-    return by_label.or_(by_placeholder).or_(by_role).or_(css_plain).or_(css_ionic)
+    return by_label.or_(by_placeholder).or_(css_plain).or_(css_ionic)
 
 def _submit_union(scope: Union[Page, Locator]) -> Locator:
-    by_role = scope.get_by_role("button", name=re.compile(r"(đăng\s*nhập|login|sign\s*in|continue|tiếp)", re.IGNORECASE))
-    css_plain = scope.locator(
-        "css=button[type='submit'], input[type='submit'], "
-        "button:has-text('Đăng nhập'), button:has-text('Login'), button:has-text('Sign in')"
-    )
-    css_ionic = scope.locator("css=ion-button, button")
-    return by_role.or_(css_plain).or_(css_ionic)
+    # Loại trừ GSI/Google buttons
+    gsi = scope.locator("[id^='gsi_'], iframe[src*='accounts.google'], [aria-label*='Google i']", has_text=re.compile("Google", re.I))
+    by_role = scope.get_by_role("button", name=re.compile(r"(đăng\s*nhập|login|sign\s*in)", re.IGNORECASE))
+    css_plain = scope.locator("css=button[type='submit'], form button.ant-btn[type='submit'], form [type='submit']")
+    submit = by_role.or_(css_plain)
+    try:
+        submit = submit.filter(has_not=gsi)
+    except Exception:
+        pass
+    return submit
 
 def _error_union(scope: Union[Page, Locator]) -> Locator:
     """
     Selector bắt thông điệp lỗi theo nhiều UI lib.
-    LƯU Ý: KHÔNG dùng ::part(...) hoặc >>> để tránh lỗi parser (đặc biệt WebKit).
-    Chỉ nhận diện 'ion-toast'/'ion-alert' ở mức thô; không đọc sâu shadow DOM ở đây.
+    Tránh ::part/>>> ở selector lỗi để an toàn multi-engine.
     """
-    # Gom nhóm theo từng chuỗi CSS "an toàn"
     groups = [
-        # tiêu chuẩn/aria/generic
-        "[role='alert'], [aria-live='assertive']",
+        # tiêu chuẩn/aria/generic (loại announcer Next.js)
+        "[role='alert']:not(#__next-route-announcer__), [aria-live='assertive']:not(#__next-route-announcer__)",
         ".invalid-feedback, .form-error",
         ".error, .error-message, .text-danger, .text-red-500, .text-red-600",
         "span.help-block, .help.is-danger",
         # Ant Design / notifications
-        ".ant-form-item-explain-error, .ant-alert-message, .ant-message-notice .ant-message-custom-content, .ant-notification-notice-description",
+        ".ant-form-item-explain-error, .ant-alert-message, .ant-message-notice .ant-message-custom-content, .ant-notification-notice-description, .ant-notification-notice-message",
         # Material / Chakra / MUI / Prime / others
         "mat-error, .mat-mdc-form-field-error, .MuiAlert-message, .chakra-alert, .p-message .p-message-text, .v-alert__content, .el-message__content",
         # Toast / Notification phổ biến
         ".toast-message, .notification-message",
-        # Ionic (chỉ phát hiện component, KHÔNG ::part / >>>)
+        # Ionic (phát hiện component)
         "ion-note[color='danger'], ion-text[color='danger'], ion-toast, ion-alert",
     ]
     loc = scope.locator("css=" + groups[0])
@@ -239,14 +227,19 @@ class LoginPage:
         return _as_fillable(el) if el else _fallback_any_textbox(self.page, self.page)
 
     def _submit(self) -> Locator:
+        # Ưu tiên nút submit trong form nếu có
+        form = self.page.locator("form").first
+        if form.count() > 0:
+            cand = _submit_union(form)
+            btn = _pick_visible(cand, self.page, timeout_ms=6000)
+            if btn:
+                return btn
         return _pick_visible(_submit_union(self.page), self.page, timeout_ms=12000)
 
     # ---------- error helpers ----------
     def visible_error_locator(self) -> Locator:
-        # locator tổng hợp các khả năng hiển thị lỗi (đÃ loại ::part/>>>)
         union = _error_union(self.page)
         try:
-            # ưu tiên phần tử có text
             vis = union.filter(has_text=re.compile(r".+")).first
             if vis and vis.count() > 0:
                 return vis
@@ -257,7 +250,6 @@ class LoginPage:
     def error_text(self, timeout_ms: int = 4000) -> str:
         loc = self.visible_error_locator()
         deadline = time.time() + timeout_ms / 1000.0
-        text = ""
         while time.time() < deadline:
             try:
                 if loc.count() > 0 and loc.first.is_visible():
@@ -267,14 +259,13 @@ class LoginPage:
             except Exception:
                 pass
             self.page.wait_for_timeout(150)
-        return text
+        return ""
 
-    # Back-compat alias cho test khác phiên bản
-    def visible_error_text(self, timeout: int = 4000) -> str:
+    def visible_error_text(self, timeout: int = 4000) -> str:  # Back-compat alias
         return self.error_text(timeout_ms=timeout)
 
     # ---------- actions ----------
-    def login(self, email: str, password: str, wait_response_ms: int = 15000) -> ResponseLike:
+    def login(self, email: str, password: str, wait_response_ms: int = 6000) -> ResponseLike:
         _fill_any(self.page, self._email_input(), email)
         _fill_any(self.page, self._password_input(), password)
 
@@ -309,9 +300,7 @@ class LoginPage:
         except Exception:
             url = self.page.url
 
-        try:
+        with contextlib.suppress(Exception):
             self.page.wait_for_load_state("domcontentloaded", timeout=5000)
-        except Exception:
-            pass
 
         return ResponseLike(status=status, url=url, body=body)
