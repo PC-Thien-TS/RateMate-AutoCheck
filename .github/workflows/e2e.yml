@@ -1,64 +1,125 @@
 name: E2E
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - '**/*.py'
-      - 'tests/**'
-      - 'Dockerfile'
-      - '.github/workflows/e2e.yml'
-      - 'requirements*'
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"   # 30 phút/lần
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e
+  cancel-in-progress: false
 
 jobs:
-  e2e:
+  run:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SITE: ratemate
+      ENV: prod
+      BASE_URL_PROD: https://store.ratemate.top
+      LOGIN_PATH: /en/login
+      REGISTER_PATH: /en/login
+      # để JUnit cho bước parse
+      JUNIT_XML: report/junit.xml
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Create .env
-        run: |
-          cat > .env <<'EOF'
-          ENV=${{ secrets.ENV }}
-          BASE_URL_PROD=${{ secrets.BASE_URL_PROD }}
-          LOGIN_PATH=${{ vars.LOGIN_PATH || '/en/login' }}
-          REGISTER_PATH=${{ vars.REGISTER_PATH || '/en/login' }}
-          LOGIN_EMAIL=${{ secrets.LOGIN_EMAIL }}
-          LOGIN_PASSWORD=${{ secrets.LOGIN_PASSWORD }}
-          LOCALES=${{ vars.LOCALES || 'en' }}
-          EOF
-
-      - name: Build Docker image
+      - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (chromium + webkit)
-        env:
-          TS: ${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Run tests (Chromium)
         run: |
-          OUT="$RUNNER_TEMP/e2e-report"
-          mkdir -p "$OUT"
-          chmod 777 "$OUT"
-          docker run --rm --ipc=host --shm-size=1g \
-            -v "${{ github.workspace }}:/app" \
-            -v "$OUT:/out" \
-            -e ARTIFACT_DIR=/out \
-            --env-file .env \
+          docker rm -f ratemate_e2e 2>/dev/null || true
+          docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
+            -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
             ratemate-tests \
-            bash -lc "pytest -vv tests/auth tests/smoke/test_routes.py \
-              --browser=chromium --browser=webkit \
-              --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-              --excelreport=/out/smoke-${TS}.xlsx"
+            bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
+              pytest -vv tests/auth tests/smoke/test_routes.py \
+                --browser=chromium \
+                -p no:pytest_excel \
+                -o cache_dir=/tmp/pytest_cache \
+                --output=/tmp/test-results \
+                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+                -o junit_family=xunit2 --junitxml=\$JUNIT_XML || true"
 
-      - name: Upload Excel report
+      - name: Copy report out
+        run: |
+          mkdir -p report
+          docker cp ratemate_e2e:/app/report ./report || true
+          docker rm -f ratemate_e2e 2>/dev/null || true
+
+      - name: Parse JUnit → summary
+        id: sum
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET, pathlib, json, sys
+          p = pathlib.Path("report/junit.xml")
+          if not p.exists():
+              print("no junit.xml", file=sys.stderr)
+              print("summary_json={}", end="")
+              sys.exit(0)
+          t = ET.parse(p).getroot()
+          # hỗ trợ cả <testsuite> hoặc <testsuites>
+          ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
+          def g(a): 
+              return int(ts.get(a, "0"))
+          total, fail, err, skip = g("tests"), g("failures"), g("errors"), g("skipped")
+          dur = float(ts.get("time", "0"))
+          fails = []
+          for tc in ts.findall(".//testcase"):
+              name = f"{tc.get('classname','')}.{tc.get('name')}"
+              f = tc.find("failure") or tc.find("error")
+              if f is not None:
+                  msg = (f.get("message") or "").strip()
+                  txt = (f.text or "").strip()
+                  reason = msg or txt or "No message"
+                  fails.append({"name": name, "reason": reason[:400]})
+          out = {"total": total, "fail": fail, "error": err, "skip": skip, "duration": dur, "fails": fails}
+          print(f"summary_json={json.dumps(out)}", end="")
+          PY
+
+      - name: Send Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
+        run: |
+          python - <<'PY'
+          import json, os, sys, textwrap, urllib.parse, subprocess
+          data = os.getenv("SUMMARY_JSON")
+          d = json.loads(data) if data else {}
+          total = d.get("total",0); fail=d.get("fail",0); err=d.get("error",0); skip=d.get("skip",0); dur=d.get("duration",0)
+          fails = d.get("fails",[])
+          status = "✅" if fail==0 and err==0 else "❌"
+          lines = [f"{status} E2E Result: {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}",
+                   f"Duration: ~{dur:.1f}s",
+                   f"Run: {os.getenv('GITHUB_SERVER_URL','')}/{os.getenv('GITHUB_REPOSITORY','')}/actions/runs/{os.getenv('GITHUB_RUN_ID','')}"]
+          if fails:
+              lines.append("")
+              lines.append("❗ Failed cases:")
+              for f in fails[:10]:
+                  lines.append(f"• {f['name']}")
+                  lines.append(f"  └─ {f['reason']}")
+          text = "\n".join(lines)
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat  = os.environ["TELEGRAM_CHAT_ID"]
+          url   = f"https://api.telegram.org/bot{token}/sendMessage"
+          payload = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+          # gửi qua curl để dễ set proxy
+          args = ["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload)]
+          proxy = os.getenv("TELEGRAM_PROXY")
+          if proxy: args[1:1] = ["-x", proxy]
+          args.append(url)
+          res = subprocess.run(args, capture_output=True, text=True)
+          print("Telegram:", res.stdout or res.stderr)
+          PY
+
+      - name: Upload HTML report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-report
-          path: ${{ runner.temp }}/e2e-report/*.xlsx
-          retention-days: 14
-          if-no-files-found: warn
+          path: report/
