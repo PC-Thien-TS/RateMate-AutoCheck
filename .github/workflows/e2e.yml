@@ -2,7 +2,7 @@ name: E2E
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # 30 phút/lần
+    - cron: "*/30 * * * *"   # chạy 30 phút/lần
   workflow_dispatch: {}
 
 concurrency:
@@ -14,29 +14,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Các biến chung cho job
+    # Biến môi trường chung cho job
     env:
       SITE: ratemate
       ENV: prod
       BASE_URL_PROD: https://store.ratemate.top
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
-      JUNIT_XML: report/junit.xml
-
-      # Credentials cho test (map từ repo secrets)
-      E2E_EMAIL:        ${{ secrets.LOGIN_EMAIL }}
-      E2E_PASSWORD:     ${{ secrets.LOGIN_PASSWORD }}
-      # Giữ tên cũ để tương thích ngược (conftest có fallback)
-      LOGIN_EMAIL:      ${{ secrets.LOGIN_EMAIL }}
-      LOGIN_PASSWORD:   ${{ secrets.LOGIN_PASSWORD }}
-
-      # Telegram (có thể để trống TELEGRAM_PROXY)
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-      TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+      # map secrets → E2E_* để test dùng
+      E2E_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # sanity check: báo thiếu secrets (không in giá trị)
+      - name: Check E2E secrets
+        run: |
+          python - <<'PY'
+          import os
+          for k in ["E2E_EMAIL","E2E_PASSWORD","LOGIN_EMAIL","LOGIN_PASSWORD"]:
+              v = os.getenv(k, "")
+              print(f"{k}: {'SET' if v else 'MISSING'} (len={len(v)})")
+          PY
 
       - name: Build test image
         run: docker build -t ratemate-tests .
@@ -46,7 +46,7 @@ jobs:
           docker rm -f ratemate_e2e 2>/dev/null || true
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
-            -e E2E_EMAIL -e E2E_PASSWORD -e LOGIN_EMAIL -e LOGIN_PASSWORD \
+            -e E2E_EMAIL -e E2E_PASSWORD \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
@@ -55,7 +55,7 @@ jobs:
                 -o cache_dir=/tmp/pytest_cache \
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-                -o junit_family=xunit2 --junitxml=\$JUNIT_XML || true"
+                -o junit_family=xunit2 --junitxml=/app/report/junit.xml || true"
 
       - name: Copy report out
         if: always()
@@ -69,51 +69,61 @@ jobs:
         if: always()
         run: |
           python - <<'PY'
-          import xml.etree.ElementTree as ET, pathlib, json, os, sys
-          out = {}
+          import xml.etree.ElementTree as ET, pathlib, json, os
           p = pathlib.Path("report/junit.xml")
+          out = {"total":0,"fail":0,"error":0,"skip":0,"duration":0,"fails":[]}
           if p.exists():
               t = ET.parse(p).getroot()
               ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
               def g(a): return int(ts.get(a, "0"))
-              total, fail, err, skip = g("tests"), g("failures"), g("errors"), g("skipped")
-              dur = float(ts.get("time", "0"))
-              fails = []
+              out["total"] = g("tests")
+              out["fail"] = g("failures")
+              out["error"] = g("errors")
+              out["skip"] = g("skipped")
+              try:
+                  out["duration"] = float(ts.get("time","0"))
+              except Exception:
+                  out["duration"] = 0.0
+              fails=[]
               for tc in ts.findall(".//testcase"):
-                  name = f"{tc.get('classname','')}.{tc.get('name')}"
                   f = tc.find("failure") or tc.find("error")
                   if f is not None:
-                      msg = (f.get("message") or "").strip()
-                      txt = (f.text or "").strip()
-                      reason = msg or txt or "No message"
+                      name = f"{tc.get('classname','')}.{tc.get('name')}"
+                      reason = (f.get('message') or f.text or "No message").strip()
                       fails.append({"name": name, "reason": reason[:400]})
-              out = {"total": total, "fail": fail, "error": err, "skip": skip, "duration": dur, "fails": fails}
+              out["fails"]=fails
           else:
-              out = {"total": 0, "fail": 0, "error": 0, "skip": 0, "duration": 0, "fails": []}
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              print("::warning::No junit.xml found; test step may have failed early")
+          # ghi output cho step
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("summary_json="+json.dumps(out)+"\n")
           PY
 
       - name: Send Telegram
         if: always()
         env:
-          SUMMARY_JSON: ${{ steps.sum.outputs.summary_json }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
         run: |
           python - <<'PY'
           import json, os, subprocess
           d = json.loads(os.getenv("SUMMARY_JSON") or "{}")
-          total = d.get("total",0); fail=d.get("fail",0); err=d.get("error",0); skip=d.get("skip",0); dur=d.get("duration",0)
+          total = d.get("total",0); fail=d.get("fail",0); err=d.get("error",0); skip=d.get("skip",0); dur=d.get("duration",0.0)
           fails = d.get("fails",[])
           status = "✅" if fail==0 and err==0 else "❌"
-          lines = [f"{status} E2E Result: {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}",
-                   f"Duration: ~{dur:.1f}s",
-                   f"Run: {os.getenv('GITHUB_SERVER_URL','')}/{os.getenv('GITHUB_REPOSITORY','')}/actions/runs/{os.getenv('GITHUB_RUN_ID','')}"]
+          lines = [
+            f"{status} E2E Result: {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}",
+            f"Duration: ~{dur:.1f}s",
+            f"Run: {os.getenv('GITHUB_SERVER_URL','')}/{os.getenv('GITHUB_REPOSITORY','')}/actions/runs/{os.getenv('GITHUB_RUN_ID','')}"
+          ]
           if fails:
-              lines.append("")
-              lines.append("❗ Failed cases:")
-              for f in fails[:10]:
-                  lines.append(f"• {f['name']}")
-                  lines.append(f"  └─ {f['reason']}")
+            lines.append("")
+            lines.append("❗ Failed cases:")
+            for f in fails[:10]:
+              lines.append(f"• {f['name']}")
+              lines.append(f"  └─ {f['reason']}")
           text = "\n".join(lines)
           token = os.environ["TELEGRAM_BOT_TOKEN"]
           chat  = os.environ["TELEGRAM_CHAT_ID"]
