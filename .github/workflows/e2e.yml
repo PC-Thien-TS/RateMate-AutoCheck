@@ -2,7 +2,7 @@ name: E2E
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # 30 phút/lần
+    - cron: "*/10 * * * *"   
   workflow_dispatch: {}
 
 concurrency:
@@ -19,8 +19,9 @@ jobs:
       BASE_URL_PROD: https://store.ratemate.top
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
-      # đường dẫn JUnit bên trong container (sẽ được copy ra sau)
-      JUNIT_XML: /app/report/junit.xml
+      # Ghi file trong container ở đường dẫn tuyệt đối để dễ copy ra
+      JUNIT_XML:  /app/report/junit.xml
+      REPORT_HTML: /app/report/e2e.html
 
     steps:
       - uses: actions/checkout@v4
@@ -30,14 +31,15 @@ jobs:
 
       - name: Run tests (Chromium)
         env:
-          # Secrets cho case login_success
-          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
-          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          # truyền tài khoản thật để login_success không bị skip
+          E2E_EMAIL:     ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD:  ${{ secrets.E2E_PASSWORD }}
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
-            -e JUNIT_XML -e E2E_EMAIL -e E2E_PASSWORD \
+            -e E2E_EMAIL -e E2E_PASSWORD \
+            -e JUNIT_XML -e REPORT_HTML \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
@@ -46,57 +48,54 @@ jobs:
                 -o cache_dir=/tmp/pytest_cache \
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-                --html=/app/report/auth.html --self-contained-html \
-                -o junit_family=xunit2 --junitxml=\$JUNIT_XML || true"
+                -o junit_family=xunit2 --junitxml=\$JUNIT_XML \
+                --html=\$REPORT_HTML --self-contained-html || true"
 
-      - name: Copy report out
+      - name: Copy report out (flatten, no nesting)
+        if: always()
         run: |
           mkdir -p report
-          # Copy đúng file để tránh lồng thư mục
-          docker cp ratemate_e2e:/app/report/junit.xml ./report/junit.xml || true
-          docker cp ratemate_e2e:/app/report/auth.html ./report/auth.html || true
+          # Dấu '/.' để copy NỘI DUNG thư mục /app/report ra ./report
+          docker cp ratemate_e2e:/app/report/. ./report || true
           docker rm -f ratemate_e2e 2>/dev/null || true
+          echo "== ls report =="
           ls -la report || true
-          head -n 20 report/junit.xml || true
 
       - name: Parse JUnit → summary
         id: sum
+        if: always()
         run: |
           python - <<'PY'
-          import os, json, pathlib, xml.etree.ElementTree as ET, sys
-          p = pathlib.Path("report/junit.xml")
+          import os, json, pathlib, xml.etree.ElementTree as ET
           out = {}
+          p = pathlib.Path("report/junit.xml")
           if p.exists():
-            try:
               t = ET.parse(p).getroot()
               ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-              def g(a): return int(ts.get(a,"0"))
+              def g(a): return int(ts.get(a, "0"))
               out = {
                   "total": g("tests"),
                   "fail": g("failures"),
                   "error": g("errors"),
-                  "skip":  g("skipped"),
+                  "skip": g("skipped"),
                   "duration": float(ts.get("time","0")),
                   "fails": [],
               }
               for tc in ts.findall(".//testcase"):
-                fe = tc.find("failure") or tc.find("error")
-                if fe is not None:
-                  name = f"{tc.get('classname','')}.{tc.get('name')}"
-                  msg  = (fe.get('message') or '').strip()
-                  txt  = (fe.text or '').strip()
-                  out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
-            except Exception as e:
-              print("Parse error:", e, file=sys.stderr)
-              out = {}
-          # ghi ra output cho step sau
+                  fe = tc.find("failure") or tc.find("error")
+                  if fe is not None:
+                      name = f"{tc.get('classname','')}.{tc.get('name')}"
+                      msg  = (fe.get("message") or "").strip()
+                      txt  = (fe.text or "").strip()
+                      out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
+          # Xuất ra output cho bước sau
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-            fh.write("summary_json<<EOF\n")
-            fh.write(json.dumps(out, ensure_ascii=False))
-            fh.write("\nEOF\n")
+              fh.write("summary_json<<EOF\n")
+              fh.write(json.dumps(out, ensure_ascii=False))
+              fh.write("\nEOF\n")
           PY
 
-      - name: Send Telegram
+      - name: Send Telegram (message + report file)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -105,8 +104,9 @@ jobs:
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
         run: |
           python - <<'PY'
-          import json, os, subprocess, xml.etree.ElementTree as ET, pathlib
-          # Lấy summary từ output; nếu rỗng thì fallback đọc lại junit.xml
+          import os, json, subprocess, xml.etree.ElementTree as ET, pathlib
+
+          # ===== compose text =====
           raw = os.getenv("SUMMARY_JSON") or ""
           d = json.loads(raw) if raw else {}
           if not d:
@@ -141,18 +141,43 @@ jobs:
 
           token = os.environ["TELEGRAM_BOT_TOKEN"]
           chat  = os.environ["TELEGRAM_CHAT_ID"]
-          url   = f"https://api.telegram.org/bot{token}/sendMessage"
-          payload = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+          proxy = os.getenv("TELEGRAM_PROXY")
 
-          args = ["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload, ensure_ascii=False)]
-          if os.getenv("TELEGRAM_PROXY"):
-              args[1:1] = ["-x", os.environ["TELEGRAM_PROXY"]]
-          args.append(url)
-          res = subprocess.run(args, capture_output=True, text=True)
-          print("Telegram:", res.stdout or res.stderr)
+          # ===== 1) sendMessage =====
+          url_msg   = f"https://api.telegram.org/bot{token}/sendMessage"
+          payload_m = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+          args_m = ["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload_m, ensure_ascii=False)]
+          if proxy: args_m[1:1] = ["-x", proxy]
+          args_m.append(url_msg)
+          res_m = subprocess.run(args_m, capture_output=True, text=True)
+          print("Telegram message:", res_m.stdout or res_m.stderr)
+
+          # ===== 2) sendDocument (HTML report) =====
+          # Ưu tiên e2e.html; nếu không có thì chọn file *.html bất kỳ trong report/
+          report = pathlib.Path("report/e2e.html")
+          if not report.exists():
+              for cand in sorted(pathlib.Path("report").glob("*.html")):
+                  report = cand
+                  break
+
+          if report.exists():
+              url_doc = f"https://api.telegram.org/bot{token}/sendDocument"
+              caption = f"E2E report • {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}"
+              # multipart/form-data
+              args_d = ["curl","-sS","-m","120","-X","POST",
+                        "-F", f"chat_id={chat}",
+                        "-F", f"caption={caption}",
+                        "-F", f"document=@{report.as_posix()}"]
+              if proxy: args_d[1:1] = ["-x", proxy]
+              args_d.append(url_doc)
+              res_d = subprocess.run(args_d, capture_output=True, text=True)
+              print("Telegram document:", res_d.stdout or res_d.stderr)
+          else:
+              print("No HTML report found to send.")
+
           PY
 
-      - name: Upload HTML report
+      - name: Upload HTML report (artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
