@@ -1,5 +1,4 @@
-Set-Content -Path .\make.ps1 -Encoding UTF8 @'
-param([Parameter(Position=0)] [string]$Target = "help")
+﻿param([Parameter(Position=0)] [string]$Target = "help")
 
 function Build {
   docker build -t ratemate-tests .
@@ -31,4 +30,3 @@ switch ($Target) {
   "smoke" { Smoke }
   default { Write-Host "Usage: .\make.ps1 [build|run|smoke]" }
 }
-'@

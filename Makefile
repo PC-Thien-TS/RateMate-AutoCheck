@@ -24,7 +24,7 @@ BASELINE_XLSX := $(REPORT_DIR)/baseline.xlsx
 
 help:
 	@echo "Targets:"
-	@echo "  make run        - full suite (KHÔNG cache mặc định)"
+	@echo "  make run              - full suite (KHÔNG cache mặc định)"
 	@echo "  USE_CACHE=1 make run  - full suite CÓ cache"
 	@echo "  make smoke/baseline/verify/clean/warm-cache"
 
@@ -37,23 +37,23 @@ build:
 	  -t $(DOCKER_IMG) -f Dockerfile .
 
 verify:
-	docker run $(DOCKER_RUN_OPTS) $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
 	  bash -lc 'python -m playwright --version; ls -la /ms-playwright || true'
 
 run: $(REPORT_DIR)
-	docker run $(DOCKER_RUN_OPTS) $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
-	  pytest $(PYTEST_COMMON) --excelreport=$(RUN_XLSX)
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	  bash -lc 'mkdir -p report test-results && pytest $(PYTEST_COMMON) --excelreport=$(RUN_XLSX)'
 
 smoke: $(REPORT_DIR)
-	docker run $(DOCKER_RUN_OPTS) $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
-	  pytest -vv tests/auth tests/smoke/test_routes.py \
-	  --browser=chromium --browser=webkit \
-	  --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-	  --excelreport=$(SMOKE_XLSX)
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	  bash -lc "mkdir -p report test-results && pytest -vv tests/auth tests/smoke/test_routes.py \
+	    --browser=chromium --browser=webkit \
+	    --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+	    --excelreport=$(SMOKE_XLSX)"
 
 baseline: $(REPORT_DIR)
-	docker run $(DOCKER_RUN_OPTS) $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
-	  pytest $(PYTEST_COMMON) --excelreport=$(BASELINE_XLSX)
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	  bash -lc 'mkdir -p report test-results && pytest $(PYTEST_COMMON) --excelreport=$(BASELINE_XLSX)'
 
 clean:
 	rm -rf $(REPORT_DIR) test-results .pytest_cache || true
@@ -61,5 +61,5 @@ clean:
 # (Tùy chọn) Làm ấm cache host trước khi USE_CACHE=1
 warm-cache:
 	mkdir -p $(HOME)/.cache/ms-playwright
-	docker run $(DOCKER_RUN_OPTS) -v "$(HOME)/.cache/ms-playwright:/ms-playwright" $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 -v "$(HOME)/.cache/ms-playwright:/ms-playwright" $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
 	  bash -lc 'python -m playwright install --with-deps'

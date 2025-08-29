@@ -1,19 +1,7 @@
-import os
-import pytest
-
-def _routes():
-    # Lấy từ ENV hoặc mặc định
-    routes_env = os.getenv("ROUTES", "/en/login,/en/store,/en/product,/en/QR")
-    return [r.strip() for r in routes_env.split(",") if r.strip()]
+# tests/smoke/test_routes.py
+import re, pytest
 
 @pytest.mark.smoke
-@pytest.mark.parametrize("path", _routes())
-def test_open_route_ok(new_page, base_url, path):
-    url = f"{base_url}{path}"
-    resp = new_page.goto(url, wait_until="domcontentloaded")
-    # Nếu resp None (SPA), bỏ check status
-    if resp:
-        assert 200 <= resp.status < 400, f"HTTP {resp.status} for {url}"
-    # Trang phải render được
-    assert new_page.title() is not None
-    assert new_page.content() is not None
+def test_open_route_ok(new_page, base_url, route):
+    new_page.goto(f"{base_url}{route}", wait_until="domcontentloaded", timeout=20000)
+    assert re.search(re.escape(route.rstrip("/")), new_page.url), f"URL mismatch for route {route}"

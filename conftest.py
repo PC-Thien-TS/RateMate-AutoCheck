@@ -1,58 +1,133 @@
+# conftest.py
 import os
+import pathlib
 import pytest
 from dotenv import load_dotenv
 
-# Tự load .env nếu có
-load_dotenv(dotenv_path=os.getenv("DOTENV_PATH", ".env"), override=True)
+try:
+    import yaml
+except Exception:
+    yaml = None
 
-def _pick_base_url() -> str:
-    env = os.getenv("ENV", "prod").lower()
+load_dotenv()  # đọc .env nếu có
+
+# ---------- helpers ----------
+def _split_csv(val, default="en"):
+    return [s.strip() for s in (val or default).split(",") if s.strip()]
+
+def _routes_from_env(key, fallback):
+    raw = os.getenv(key)
+    return [p.strip() for p in raw.split(",") if p.strip()] if raw else list(fallback)
+
+def _site_name() -> str:
+    return (os.getenv("SITE") or "ratemate").strip()
+
+def _load_yaml_for_site(site: str):
+    cfg_dir = os.getenv("CONFIG_DIR") or "config/sites"
+    p = pathlib.Path(cfg_dir) / f"{site}.yml"
+    if p.exists() and yaml:
+        with p.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+        return data
+    return None
+
+def _cfg_from_yaml(data: dict):
+    base_url = (data.get("base_url") or "").rstrip("/")
+    assert base_url, f"Thiếu base_url trong YAML"
+
+    auth_paths = data.get("auth_paths") or {}
+    login_path = auth_paths.get("login") or "/login"
+    register_path = auth_paths.get("register") or "/register"
+
+    cred = data.get("credentials") or {}
+    email = cred.get("email") or os.getenv("E2E_EMAIL") or os.getenv("LOGIN_EMAIL", "")
+    password = cred.get("password") or os.getenv("E2E_PASSWORD") or os.getenv("LOGIN_PASSWORD", "")
+
+    locales = list(data.get("locales") or ["en"])
+    routes = list(data.get("routes") or [login_path])
+
+    return base_url, {"login": login_path, "register": register_path}, {"email": email, "password": password}, locales, routes
+
+# ======== Fallback ENV-only (nếu không có YAML) ========
+def _cfg_ratemate_env_only():
+    env = (os.getenv("ENV") or "prod").lower()
     if env == "staging":
-        return os.getenv("BASE_URL_STAGING")
-    return os.getenv("BASE_URL_PROD")
+        base_url = os.getenv("BASE_URL_STAGING")
+    else:
+        base_url = os.getenv("BASE_URL_PROD")
+    base_url = (base_url or os.getenv("BASE_URL") or "").rstrip("/")
+    assert base_url, "Thiếu BASE_URL_PROD/BASE_URL_STAGING hoặc BASE_URL"
 
-@pytest.fixture(scope="session")
-def base_url():
-    url = _pick_base_url()
-    assert url, "BASE_URL_* chưa được cấu hình trong .env"
-    return url.rstrip("/")
-
-@pytest.fixture(scope="session")
-def auth_paths():
-    return {
+    auth_paths = {
         "login": os.getenv("LOGIN_PATH", "/en/login"),
         "register": os.getenv("REGISTER_PATH", "/en/register"),
     }
+    credentials = {
+        "email": os.getenv("E2E_EMAIL") or os.getenv("LOGIN_EMAIL", ""),
+        "password": os.getenv("E2E_PASSWORD") or os.getenv("LOGIN_PASSWORD", ""),
+    }
+    locales = _split_csv(os.getenv("LOCALES"), "en")
+    routes = _routes_from_env("SMOKE_ROUTES", ["/en/login", "/en/store", "/en/product", "/en/QR"])
+    return base_url, auth_paths, credentials, locales, routes
+
+# ======== Active site selector (YAML-first) ========
+def _active_site_cfg():
+    """
+    Trả về tuple: (site, base_url, auth_paths, credentials, locales, routes)
+    - Ưu tiên file YAML: config/sites/{SITE}.yml
+    - Fallback: biến môi trường (kiểu cũ)
+    """
+    site = _site_name()
+    y = _load_yaml_for_site(site)
+    if y:
+        base_url, auth_paths, credentials, locales, routes = _cfg_from_yaml(y)
+        return site, base_url, auth_paths, credentials, locales, routes
+    base_url, auth_paths, credentials, locales, routes = _cfg_ratemate_env_only()
+    return site, base_url, auth_paths, credentials, locales, routes
+
+# ================== PYTEST META ==================
+def pytest_configure(config):
+    site, base_url, *_ = _active_site_cfg()
+    md = getattr(config, "_metadata", None)
+    if md is not None:
+        md["SITE"] = site
+        md["ENV"] = os.getenv("ENV", "prod")
+        md["Base URL"] = base_url
+
+# ================ Fixtures =================
+@pytest.fixture(scope="session")
+def site():
+    return _active_site_cfg()[0]
+
+@pytest.fixture(scope="session")
+def base_url():
+    return _active_site_cfg()[1]
+
+@pytest.fixture(scope="session")
+def auth_paths():
+    return _active_site_cfg()[2]
 
 @pytest.fixture(scope="session")
 def credentials():
-    return {
-        "email": os.getenv("LOGIN_EMAIL"),
-        "password": os.getenv("LOGIN_PASSWORD"),
-    }
+    return _active_site_cfg()[3]
 
-# ---- PLAYWRIGHT FIXTURES ----
-# Dùng option --browser (có sẵn của pytest-playwright): chromium | firefox | webkit
-# KHÔNG tự add lại option --browser để tránh xung đột.
+@pytest.fixture(scope="session")
+def locales():
+    return _active_site_cfg()[4]
 
-@pytest.fixture
-def context_kwargs():
-    return {
-        "locale": "en-US",
-        "permissions": [],
-        "java_script_enabled": True,
-        # headless: mặc định là True trên CI/container
-    }
+@pytest.fixture(scope="session")
+def routes():
+    return _active_site_cfg()[5]
 
 @pytest.fixture
-def new_context(browser, context_kwargs):
-    # 'browser' fixture do pytest-playwright cung cấp
-    ctx = browser.new_context(**context_kwargs)
-    yield ctx
-    ctx.close()
+def new_page(page):
+    return page
 
-@pytest.fixture
-def new_page(new_context):
-    page = new_context.new_page()
-    yield page
-    page.close()
+# ============ TỰ ĐỘNG PARAMETRIZE routes/locales ============
+def pytest_generate_tests(metafunc):
+    if "route" in metafunc.fixturenames:
+        _routes = _active_site_cfg()[5]
+        metafunc.parametrize("route", _routes, ids=_routes or ["<no-routes>"])
+    if "locale" in metafunc.fixturenames:
+        _locales = _active_site_cfg()[4]
+        metafunc.parametrize("locale", _locales, ids=_locales or ["default"])
