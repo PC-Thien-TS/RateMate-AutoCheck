@@ -1,6 +1,6 @@
 # pages/factory.py
 from .auth.login_page import LoginPage
-from .auth.register_page import RegisterPage  # <— nay import từ auth
+from .auth.register_page import RegisterPage
 
 class PageFactory:
     def __init__(self, page, site_cfg: dict):
@@ -16,3 +16,4 @@ class PageFactory:
                             self.cfg.get("register_path", "/en/login"))
 
 __all__ = ["LoginPage", "RegisterPage", "PageFactory"]
+    

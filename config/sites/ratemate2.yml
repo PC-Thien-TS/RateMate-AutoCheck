@@ -1,0 +1,18 @@
+# config/sites/ratemate2.yml
+base_url: "http://192.168.1.7:19070"
+
+auth_paths:
+  login: "/sign-in"
+  register: "/sign-up"
+
+credentials:
+  # Để trống nếu không có; test_login_success sẽ tự skip khi thiếu
+  email: ""
+  password: ""
+
+locales: ["en"]
+
+routes:
+  - "/sign-in"
+  - "/sign-up"
+  - "/home"
