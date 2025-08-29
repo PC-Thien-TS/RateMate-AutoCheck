@@ -14,7 +14,7 @@ class ResponseLike:
     url: Optional[str] = None
     body: str = ""
 
-def _fill_force(locator: Locator, value: str, timeout_ms: int = 6000):
+def _fill_force(locator: Locator, value: str, timeout_ms: int = 9000):
     locator.wait_for(state="visible", timeout=timeout_ms)
     with contextlib.suppress(Exception):
         locator.click(timeout=timeout_ms)
@@ -236,6 +236,17 @@ class LoginPage:
     def _password_input(self) -> Locator:
         self._reveal_password_if_needed()
 
+        # 0) Ưu tiên tìm theo label/placeholder/role (phủ case IonInput textbox)
+        rx = re.compile(r"(password|mật\s*khẩu)", re.I)
+        cand0 = self.page.get_by_label(rx).or_(
+            self.page.get_by_placeholder(rx)
+        ).or_(
+            self.page.get_by_role("textbox", name=rx)
+        )
+        el0 = _first_visible(cand0, timeout_ms=2000)
+        if el0 and not _is_inside_ion_searchbar(el0):
+            return el0
+
         # Ưu tiên trong form/container
         forms = self.page.locator("form")
         with contextlib.suppress(Exception):
@@ -257,7 +268,14 @@ class LoginPage:
         el = _first_visible(cand, timeout_ms=3000)
         if el and not _is_inside_ion_searchbar(el):
             return el
-        return cand.first
+
+        # 3) Fallback thêm: placeholder có 'password' / 'Mật khẩu' dù type không phải password
+        cand2 = self.page.locator("input[placeholder*='password' i], input[placeholder*='mật' i]")
+        el2 = _first_visible(cand2, timeout_ms=2000)
+        if el2 and not _is_inside_ion_searchbar(el2):
+            return el2
+
+        return (cand2.first if cand2.count() else cand.first)
 
     # ----- submit -----
 
