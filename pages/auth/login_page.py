@@ -1,304 +1,329 @@
 # pages/auth/login_page.py
-from __future__ import annotations
-
 import re
-import time
 import contextlib
-from typing import Optional, Union
+from dataclasses import dataclass
+from typing import Optional
+
 from playwright.sync_api import Page, Locator
 
-# ----------------- small response wrapper -----------------
+# -------------------- helpers --------------------
+
+@dataclass
 class ResponseLike:
-    def __init__(self, status: Optional[int] = None, url: str = "", body: str = ""):
-        self._status = status
-        self.url = url
-        self._body = body
+    status: Optional[int] = None
+    url: Optional[str] = None
+    body: str = ""
 
-    @property
-    def status(self) -> Optional[int]:
-        return self._status
+def _fill_force(locator: Locator, value: str, timeout_ms: int = 6000):
+    locator.wait_for(state="visible", timeout=timeout_ms)
+    with contextlib.suppress(Exception):
+        locator.click(timeout=timeout_ms)
+    with contextlib.suppress(Exception):
+        locator.fill("")
+    with contextlib.suppress(Exception):
+        locator.press("Control+A", timeout=800)
+    locator.type(value, delay=10)
 
-    def text(self) -> str:
-        return self._body or ""
-
-# ----------------- helpers -----------------
-def _as_fillable(loc: Locator) -> Locator:
-    inner = loc.locator(
-        "css=:scope >>> input, "
-        ":scope >>> textarea, "
-        ":scope >>> .native-input, "
-        ":scope >>> [part='native'], "
-        ":scope >>> [contenteditable], "
-        ":scope >>> [contenteditable='true']"
-    )
-    if inner.count() > 0:
-        return inner.first
-    inner2 = loc.locator("css=input, textarea, [contenteditable], [contenteditable='true']")
-    if inner2.count() > 0:
-        return inner2.first
-    return loc
-
-def _scan_visible_editable(raw: Locator, page: Page, timeout_ms: int = 12000, scan_limit: int = 12) -> Optional[Locator]:
-    deadline = time.time() + timeout_ms / 1000.0
-    while time.time() < deadline:
-        try:
-            n = raw.count()
-        except Exception:
-            n = 0
-        if n > 0:
-            upto = min(n, scan_limit)
-            for i in range(upto):
-                el = raw.nth(i)
-                try:
-                    if el.is_visible() and el.is_enabled() and el.is_editable():
-                        return el
-                except Exception:
-                    pass
-        page.wait_for_timeout(150)
-    return None
-
-def _pick_visible(raw: Locator, page: Page, timeout_ms: int = 9000, scan_limit: int = 12) -> Locator:
-    deadline = time.time() + timeout_ms / 1000.0
-    last_n = 0
-    while time.time() < deadline:
-        try:
-            n = raw.count()
-            last_n = n
-        except Exception:
-            n = 0
-        if n > 0:
-            upto = min(n, scan_limit)
-            for i in range(upto):
-                el = raw.nth(i)
-                try:
-                    if el.is_visible():
-                        return el
-                except Exception:
-                    pass
-        page.wait_for_timeout(150)
-    return raw.first if last_n > 0 else raw
-
-def _fill_any(page: Page, loc: Locator, value: str) -> None:
-    loc = _as_fillable(loc)
-    for fn, arg in (("click", None), ("fill", ""), ("fill", value), ("type", value)):
-        try:
-            getattr(loc, fn)(*((),)[0] if arg is None else (arg,), timeout=2000)
-            if fn in ("fill", "type") and arg == value:
-                return
-        except Exception:
-            pass
+def _is_inside_ion_searchbar(loc: Locator) -> bool:
     try:
-        handle = loc.element_handle(timeout=1500)
-        if handle:
-            page.evaluate(
-                "(el, v) => { if ('value' in el) { el.value = v; } "
-                "el.dispatchEvent(new Event('input', {bubbles:true})); "
-                "el.dispatchEvent(new Event('change', {bubbles:true})); }",
-                handle, value
-            )
+        anc = loc.locator("xpath=ancestor::ion-searchbar[1]")
+        return anc.count() > 0
     except Exception:
-        pass
+        return False
 
-def _textbox_union(scope: Union[Page, Locator], patterns: str) -> Locator:
-    by_label = scope.get_by_label(re.compile(patterns, re.IGNORECASE))
-    by_placeholder = scope.get_by_placeholder(re.compile(patterns, re.IGNORECASE))
-    by_role = scope.get_by_role("textbox", name=re.compile(patterns, re.IGNORECASE))
-    by_testid = scope.get_by_test_id(re.compile(patterns, re.IGNORECASE))
-    css_plain = scope.locator(
-        "css=input[type='text'], input[type='email'], textarea, "
-        "input[id*='email' i], input[name*='email' i], "
-        "input[id*='user' i], input[name*='user' i], "
-        "input[id*='identifier' i], input[name*='identifier' i], "
-        "input[id*='login' i], input[name*='login' i], "
-        "input[id*='phone' i], input[name*='phone' i], "
-        "[contenteditable], [contenteditable='true']"
-    )
-    css_ionic = scope.locator("css=ion-input, ion-textarea, ion-item input, ion-item textarea")
-    return by_label.or_(by_placeholder).or_(by_role).or_(by_testid).or_(css_plain).or_(css_ionic)
-
-def _password_union(scope: Union[Page, Locator]) -> Locator:
-    patt = r"(mật\s*khẩu|password|pass|pwd)"
-    by_label = scope.get_by_label(re.compile(patt, re.IGNORECASE))
-    by_placeholder = scope.get_by_placeholder(re.compile(patt, re.IGNORECASE))
-    css_plain = scope.locator(
-        "css=input[type='password'], "
-        "input[id*='pass' i], input[name*='pass' i], "
-        "input[autocomplete*='current-password' i], input[autocomplete*='password' i]"
-    )
-    css_ionic = scope.locator("css=ion-input, ion-textarea")
-    return by_label.or_(by_placeholder).or_(css_plain).or_(css_ionic)
-
-def _submit_union(scope: Union[Page, Locator]) -> Locator:
-    # Loại trừ GSI/Google buttons
-    gsi = scope.locator("[id^='gsi_'], iframe[src*='accounts.google'], [aria-label*='Google i']", has_text=re.compile("Google", re.I))
-    by_role = scope.get_by_role("button", name=re.compile(r"(đăng\s*nhập|login|sign\s*in)", re.IGNORECASE))
-    css_plain = scope.locator("css=button[type='submit'], form button.ant-btn[type='submit'], form [type='submit']")
-    submit = by_role.or_(css_plain)
+def _first_visible(loc: Locator, timeout_ms: int = 6000) -> Optional[Locator]:
     try:
-        submit = submit.filter(has_not=gsi)
+        item = loc.first
+        item.wait_for(state="visible", timeout=timeout_ms)
+        return item
     except Exception:
-        pass
-    return submit
+        return None
 
-def _error_union(scope: Union[Page, Locator]) -> Locator:
-    """
-    Selector bắt thông điệp lỗi theo nhiều UI lib.
-    Tránh ::part/>>> ở selector lỗi để an toàn multi-engine.
-    """
-    groups = [
-        # tiêu chuẩn/aria/generic (loại announcer Next.js)
-        "[role='alert']:not(#__next-route-announcer__), [aria-live='assertive']:not(#__next-route-announcer__)",
-        ".invalid-feedback, .form-error",
-        ".error, .error-message, .text-danger, .text-red-500, .text-red-600",
-        "span.help-block, .help.is-danger",
-        # Ant Design / notifications
-        ".ant-form-item-explain-error, .ant-alert-message, .ant-message-notice .ant-message-custom-content, .ant-notification-notice-description, .ant-notification-notice-message",
-        # Material / Chakra / MUI / Prime / others
-        "mat-error, .mat-mdc-form-field-error, .MuiAlert-message, .chakra-alert, .p-message .p-message-text, .v-alert__content, .el-message__content",
-        # Toast / Notification phổ biến
-        ".toast-message, .notification-message",
-        # Ionic (phát hiện component)
-        "ion-note[color='danger'], ion-text[color='danger'], ion-toast, ion-alert",
-    ]
-    loc = scope.locator("css=" + groups[0])
-    for g in groups[1:]:
-        loc = loc.or_(scope.locator("css=" + g))
-    return loc
+def _class_contains_expr(s: str) -> str:
+    # XPATH contains(@class,'login'|'auth'|'sign')
+    s = s.lower()
+    return ("contains(translate(@class,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'%s')" % s)
 
-def _fallback_any_textbox(scope: Union[Page, Locator], page: Page) -> Locator:
-    ionic_inner = scope.locator("css=ion-input >>> input, ion-textarea >>> textarea, ion-item input, ion-item textarea")
-    el = _scan_visible_editable(ionic_inner, page, timeout_ms=5000)
-    if el:
-        return _as_fillable(el)
-    ionic_any = scope.locator("css=ion-input, ion-textarea")
-    el2 = _scan_visible_editable(ionic_any, page, timeout_ms=4000)
-    if el2:
-        return _as_fillable(el2)
-    broad = scope.locator(
-        "css=input:not([type='hidden']):not([type='checkbox']):not([type='radio']):"
-        "not([type='file']):not([type='submit']), "
-        "textarea, [contenteditable], [contenteditable='true']"
-    )
-    el3 = _scan_visible_editable(broad, page, timeout_ms=4000)
-    if el3:
-        return _as_fillable(el3)
-    return scope.locator("css=input, textarea, [contenteditable], [contenteditable='true']").first
+# -------------------- Login Page --------------------
 
-# ----------------- Page object -----------------
 class LoginPage:
-    def __init__(self, page: Page, base_url: str, path: str):
+    def __init__(self, page: Page, base_url: str, login_path: str = "/login"):
         self.page = page
-        self.base_url = (base_url or "").rstrip("/")
-        self.path = path if path.startswith("/") else f"/{path}"
+        self.base_url = base_url.rstrip("/")
+        self.login_path = login_path if login_path.startswith("/") else f"/{login_path}"
 
-    def _candidate_paths(self) -> list[str]:
-        uniq = []
-        for p in [self.path, "/login", "/sign-in", "/signin", "/auth/login"]:
-            if p not in uniq:
-                uniq.append(p)
-        return uniq
+    # thử nhiều path login phổ biến
+    def _candidate_paths(self):
+        seen = set()
+        order = [
+            self.login_path,
+            "/login", "/log-in", "/signin", "/sign-in",
+            "/auth/login",
+        ]
+        for p in order:
+            if p and p not in seen:
+                seen.add(p)
+                yield p
 
-    def goto(self) -> None:
+    def goto(self):
+        last_err = None
         for p in self._candidate_paths():
+            url = f"{self.base_url}{p}"
             try:
-                self.page.goto(f"{self.base_url}{p}", wait_until="domcontentloaded")
-                container = self.page.locator("form, ion-content, ion-card, .ant-form, [role='form']")
-                if container.count() > 0:
-                    self.page.wait_for_timeout(300)
+                self.page.goto(url, wait_until="domcontentloaded", timeout=12000)
+                with contextlib.suppress(Exception):
+                    self.page.wait_for_timeout(250)
+                if re.search(r"/(auth/login|log[-_]?in|sign[-_]?in)(\?|/|$)", self.page.url, re.I):
                     return
+            except Exception as e:
+                last_err = e
+        if last_err:
+            raise last_err
+
+    # ----- chuyển qua chế độ password (nếu có) -----
+    def _switch_to_password_mode(self):
+        with contextlib.suppress(Exception):
+            tab = self.page.get_by_role("tab", name=re.compile(r"(password|mật\s*khẩu)", re.I)).first
+            if tab.is_visible(timeout=600):
+                tab.click(timeout=600)
+                self.page.wait_for_timeout(150)
+        with contextlib.suppress(Exception):
+            btn = self.page.get_by_role(
+                "button",
+                name=re.compile(r"(email\s*&\s*password|mật\s*khẩu|use\s*password)", re.I),
+            ).first
+            if btn.is_visible(timeout=600):
+                btn.click(timeout=600)
+                self.page.wait_for_timeout(150)
+
+    # ----- scope tìm container của form/auth -----
+    def _find_form_scope(self, anchor: Locator) -> Optional[Locator]:
+        if not anchor:
+            return None
+        with contextlib.suppress(Exception):
+            f = anchor.locator("xpath=ancestor::form[1]")
+            if f.count() > 0:
+                return f.first
+        with contextlib.suppress(Exception):
+            f = anchor.locator("xpath=ancestor::*[@role='form' or contains(@class,'form')][1]")
+            if f.count() > 0:
+                return f.first
+        # container có class gợi ý "login|auth|sign"
+        with contextlib.suppress(Exception):
+            xpath = (
+                "xpath=ancestor::*["
+                f"{_class_contains_expr('login')} or "
+                f"{_class_contains_expr('auth')} or "
+                f"{_class_contains_expr('sign')}"
+                "][1]"
+            )
+            f = anchor.locator(xpath)
+            if f.count() > 0:
+                return f.first
+        return None
+
+    # ----- field locators (ƯU TIÊN TRONG container, tránh ion-searchbar) -----
+
+    def _email_input(self) -> Locator:
+        # 1) Ưu tiên trong <form> nếu có
+        forms = self.page.locator("form")
+        with contextlib.suppress(Exception):
+            cnt = forms.count()
+        cnt = min(cnt or 0, 4)
+        for i in range(cnt):
+            f = forms.nth(i)
+            cand = f.locator(
+                "input[type='email'], "
+                "input[autocomplete*='username' i], "
+                "input[name*='email' i], input[id*='email' i], "
+                "input[name*='user' i], input[id*='user' i]"
+            )
+            el = _first_visible(cand, timeout_ms=3500)
+            if el and not _is_inside_ion_searchbar(el):
+                return el
+
+        # 2) Nếu form chưa hiện input, thử chuyển qua password-mode rồi tìm lại
+        self._switch_to_password_mode()
+        for i in range(cnt):
+            f = forms.nth(i)
+            cand = f.locator(
+                "input[type='email'], "
+                "input[autocomplete*='username' i], "
+                "input[name*='email' i], input[id*='email' i], "
+                "input[name*='user' i], input[id*='user' i]"
+            )
+            el = _first_visible(cand, timeout_ms=2500)
+            if el and not _is_inside_ion_searchbar(el):
+                return el
+
+        # 3) Nếu đã thấy password, ưu tiên tìm input anh/chị em trong cùng container
+        pwd = None
+        with contextlib.suppress(Exception):
+            pwd = self._password_input()
+        scope = self._find_form_scope(pwd) if pwd else None
+        if scope is None:
+            scope = self.page  # Fallback an toàn
+
+        if pwd:
+            near_pwd = pwd.locator(
+                "xpath=ancestor::*[self::form or "
+                "contains(translate(@class,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'login') or "
+                "contains(translate(@class,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'auth') or "
+                "contains(translate(@class,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'sign')][1]"
+                "//input[not(@type='password') and not(@type='search')]"
+            )
+            with contextlib.suppress(Exception):
+                ncnt = near_pwd.count()
+            for i in range(min(ncnt or 0, 6)):
+                cand = near_pwd.nth(i)
+                try:
+                    cand.wait_for(state="visible", timeout=1200)
+                    if not _is_inside_ion_searchbar(cand):
+                        # ưu tiên placeholder/hint có chữ email/phone/username
+                        with contextlib.suppress(Exception):
+                            ph = (cand.get_attribute("placeholder") or "").strip()
+                        with contextlib.suppress(Exception):
+                            nm = (cand.get_attribute("name") or "") + " " + (cand.get_attribute("id") or "")
+                        if re.search(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại|tài\s*khoản)", ph + " " + nm, re.I):
+                            return cand
+                except Exception:
+                    continue
+
+        # 4) Fallback theo label/placeholder/role textbox (lọc ion-searchbar)
+        cand = self.page.get_by_label(
+            re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)", re.I)
+        ).or_(
+            self.page.get_by_placeholder(
+                re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)", re.I)
+            )
+        ).or_(
+            self.page.get_by_role("textbox", name=re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)", re.I))
+        )
+        el = _first_visible(cand, timeout_ms=2000)
+        if el and not _is_inside_ion_searchbar(el):
+            return el
+
+        # 5) Fallback cuối: quét input toàn trang (loại password/search và ion-searchbar)
+        generic = scope.locator("input:not([type='password']):not([type='search'])")
+        with contextlib.suppress(Exception):
+            gcnt = generic.count()
+        for i in range(min(gcnt or 0, 10)):
+            cand = generic.nth(i)
+            try:
+                cand.wait_for(state="visible", timeout=1000)
+                if _is_inside_ion_searchbar(cand):
+                    continue
+                with contextlib.suppress(Exception):
+                    ph = (cand.get_attribute("placeholder") or "").strip()
+                with contextlib.suppress(Exception):
+                    nm = (cand.get_attribute("name") or "") + " " + (cand.get_attribute("id") or "")
+                if re.search(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại|tài\s*khoản)", ph + " " + nm, re.I):
+                    return cand
             except Exception:
                 continue
-        self.page.wait_for_timeout(150)
 
-    # ---------- locators ----------
-    def _email_input(self) -> Locator:
-        patterns = r"(e-?mail|email|username|user\s*name|tên\s*đăng\s*nhập|phone|số\s*điện\s*thoại|sdt|mobile)"
-        raw = _textbox_union(self.page, patterns).or_(
-            self.page.locator("css=ion-input[name*='email' i], ion-input[type='email'], input[name*='email' i], input[type='email']")
-        )
-        el = _scan_visible_editable(raw, self.page, timeout_ms=9000)
-        return _as_fillable(el) if el else _fallback_any_textbox(self.page, self.page)
+        # Cho về locator hợp lệ để tránh None, test sẽ fail hợp lý nếu nhập sai trường
+        return generic.first
+
+    def _reveal_password_if_needed(self):
+        with contextlib.suppress(Exception):
+            toggler = self.page.get_by_role(
+                "button", name=re.compile(r"(show|hiện|toggle).*password", re.I)
+            ).first
+            if toggler.is_visible(timeout=600):
+                toggler.click(timeout=600)
 
     def _password_input(self) -> Locator:
-        raw = _password_union(self.page).or_(
-            self.page.locator("css=ion-input[type='password'], input[type='password'], ion-input[name*='pass' i], input[name*='pass' i]")
-        )
-        el = _scan_visible_editable(raw, self.page, timeout_ms=9000)
-        return _as_fillable(el) if el else _fallback_any_textbox(self.page, self.page)
+        self._reveal_password_if_needed()
 
-    def _submit(self) -> Locator:
-        # Ưu tiên nút submit trong form nếu có
-        form = self.page.locator("form").first
-        if form.count() > 0:
-            cand = _submit_union(form)
-            btn = _pick_visible(cand, self.page, timeout_ms=6000)
+        # Ưu tiên trong form/container
+        forms = self.page.locator("form")
+        with contextlib.suppress(Exception):
+            cnt = forms.count()
+        cnt = min(cnt or 0, 4)
+        for i in range(cnt):
+            f = forms.nth(i)
+            cand = f.locator("input[type='password'], input[id*='pass' i], input[name*='pass' i]")
+            el = _first_visible(cand, timeout_ms=3000)
+            if el and not _is_inside_ion_searchbar(el):
+                return el
+
+        # Fallback toàn trang (vẫn tránh ion-searchbar)
+        cand = self.page.locator(
+            "input[type='password'], "
+            "input[id*='pass' i], input[name*='pass' i], "
+            "input[autocomplete*='current-password' i], input[autocomplete*='password' i]"
+        )
+        el = _first_visible(cand, timeout_ms=3000)
+        if el and not _is_inside_ion_searchbar(el):
+            return el
+        return cand.first
+
+    # ----- submit -----
+
+    def _submit_union(self, scope: Locator) -> Locator:
+        by_role = scope.get_by_role(
+            "button",
+            name=re.compile(r"(đăng\s*nhập|login|log\s*in|sign\s*in|continue|tiếp)", re.I),
+        )
+        css_submit = scope.locator("button[type='submit'], input[type='submit']")
+        css_named = scope.locator(
+            "button:has-text('Đăng nhập'), button:has-text('Login'), "
+            "button:has-text('Log in'), button:has-text('Sign in')"
+        )
+        cand = by_role.or_(css_submit).or_(css_named)
+        # tránh nút reset/clear của ion-searchbar
+        cand = cand.filter(has_not=self.page.locator("[aria-label='reset']")).locator(":not(ion-searchbar *)")
+        return cand
+
+    def _pick_submit(self, form_scope: Optional[Locator], email_input: Optional[Locator], pwd: Optional[Locator]) -> Optional[Locator]:
+        # ưu tiên theo form -> container gần email -> container gần password -> toàn trang
+        for scope in (form_scope, self._find_form_scope(email_input) if email_input else None, self._find_form_scope(pwd) if pwd else None, self.page):
+            if scope is None:
+                continue
+            btn = _first_visible(self._submit_union(scope), timeout_ms=6000)
             if btn:
                 return btn
-        return _pick_visible(_submit_union(self.page), self.page, timeout_ms=12000)
+        return None
 
-    # ---------- error helpers ----------
-    def visible_error_locator(self) -> Locator:
-        union = _error_union(self.page)
-        try:
-            vis = union.filter(has_text=re.compile(r".+")).first
-            if vis and vis.count() > 0:
-                return vis
-        except Exception:
-            pass
-        return union
+    # ----- actions -----
 
-    def error_text(self, timeout_ms: int = 4000) -> str:
-        loc = self.visible_error_locator()
-        deadline = time.time() + timeout_ms / 1000.0
-        while time.time() < deadline:
-            try:
-                if loc.count() > 0 and loc.first.is_visible():
-                    t = (loc.first.inner_text(timeout=500) or "").strip()
-                    if t:
-                        return t
-            except Exception:
-                pass
-            self.page.wait_for_timeout(150)
-        return ""
+    def login(self, email: str, password: str, wait_response_ms: int = 15000) -> ResponseLike:
+        # cố gắng vào chế độ password trước
+        self._switch_to_password_mode()
 
-    def visible_error_text(self, timeout: int = 4000) -> str:  # Back-compat alias
-        return self.error_text(timeout_ms=timeout)
+        email_input = self._email_input()
+        _fill_force(email_input, email)
 
-    # ---------- actions ----------
-    def login(self, email: str, password: str, wait_response_ms: int = 6000) -> ResponseLike:
-        _fill_any(self.page, self._email_input(), email)
-        _fill_any(self.page, self._password_input(), password)
+        pwd = self._password_input()
+        _fill_force(pwd, password)
 
-        try:
-            self._submit().click(timeout=3000)
-        except Exception:
-            try:
-                _as_fillable(self._password_input()).press("Enter", timeout=1500)
-            except Exception:
-                pass
+        form_scope = self._find_form_scope(email_input) or self._find_form_scope(pwd)
+        if form_scope is None:
+            form_scope = self.page
 
-        self.page.wait_for_timeout(400)
+        with contextlib.suppress(Exception):
+            btn = self._pick_submit(form_scope, email_input, pwd)
+            if btn:
+                btn.click(timeout=2500)
 
-        patt = re.compile(r"/(auth|login|sign|session)", re.IGNORECASE)
-        status: Optional[int] = None
-        url: str = ""
-        body: str = ""
-        try:
-            resp = self.page.wait_for_response(lambda r: bool(patt.search(r.url or "")), timeout=wait_response_ms)
-            try:
-                status = resp.status
-            except Exception:
-                try:
-                    status = resp.status()
-                except Exception:
-                    status = None
-            url = resp.url
-            try:
-                body = resp.text()
-            except Exception:
-                body = url
-        except Exception:
-            url = self.page.url
+        # chờ response auth/login
+        patt = re.compile(r"/(auth|login|log[-_]?in|sign|session|token)", re.I)
+        status = None
+        url = self.page.url
+        body = ""
+        with contextlib.suppress(Exception):
+            resp = self.page.wait_for_response(
+                lambda r: (patt.search(r.url or "") is not None)
+                or (r.request and r.request.method in ("POST", "PUT", "PATCH") and patt.search(r.url or "")),
+                timeout=wait_response_ms,
+            )
+            with contextlib.suppress(Exception):
+                status = resp.status if hasattr(resp, "status") else resp.status()
+            with contextlib.suppress(Exception):
+                url = resp.url
+            with contextlib.suppress(Exception):
+                body = resp.text() or ""
 
         with contextlib.suppress(Exception):
             self.page.wait_for_load_state("domcontentloaded", timeout=5000)

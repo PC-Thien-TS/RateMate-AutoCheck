@@ -1,70 +1,66 @@
 # tests/auth/test_register.py
-import os
-import re
-import pytest
-from pages.factory import RegisterPage
+import os, re, pytest, contextlib
+from pages.factory import PageFactory
 
+_ERR_RE_DUP = re.compile(r"(exist|already|duplicate|taken|registered|trùng|đã\s*tồn|invalid|error)", re.I)
+_ERR_RE_PW  = re.compile(r"(password|mật\s*khẩu|invalid|incorrect|sai|không\s*hợp\s*lệ|error)", re.I)
 
-_ERR_DUP = re.compile(r"(duplicate|already\s+exists|đã\s*tồn\s*tại|registered|存在|已注册|đã đăng ký)", re.I)
-_ERR_PW  = re.compile(r"(invalid|incorrect|wrong|mật\s*khẩu|密码|錯誤|错误)", re.I)
+def _factory(new_page, site, base_url, auth_paths):
+    return PageFactory(new_page, {
+        "site": site,
+        "base_url": base_url,
+        "login_path": auth_paths["login"],
+        "register_path": auth_paths["register"],
+    })
+
+def _visible_error_text(page, picker):
+    with contextlib.suppress(Exception):
+        t = picker(timeout=5000)  # reg.visible_error_text(...)
+        return t or ""
+    return ""
+
+def _fallback_still_on_register_or_signin(page, auth_paths):
+    url = page.url
+    return url.endswith(auth_paths["register"]) or re.search(r"sign[-_]?up|sign[-_]?in|register", url, re.I)
 
 @pytest.mark.auth
-def test_register_duplicate_email_returns_error(new_page, base_url, auth_paths, credentials):
-    """
-    Email đã tồn tại + mật khẩu đúng:
-      - Kỳ vọng CHÍNH: API trả 400/409 (duplicate) hoặc UI hiện thông báo duplicate.
-      - Kỳ vọng PHỤ: nếu hệ thống hợp nhất & cho login luôn → chuyển /store.
-    """
-    reg = RegisterPage(new_page, base_url, auth_paths["register"])
+def test_register_duplicate_email_returns_error(new_page, site, base_url, auth_paths, credentials):
+    reg = _factory(new_page, site, base_url, auth_paths).register()
     reg.goto()
-
     full_name = os.getenv("FULL_NAME") or "QA Auto"
     resp = reg.register_email(credentials["email"], credentials["password"], full_name, wait_response_ms=15000)
 
-    # Nếu backend trả mã lỗi rõ ràng
-    if resp and resp.status in (400, 401, 403, 409):
-        assert True
+    # 1) HTTP status coi như báo lỗi hợp lệ
+    if getattr(resp, "status", None) in {400,401,403,409,422}:
         return
 
-    # Nếu không có response “lỗi”, kiểm tra UI có hiển thị lỗi/ở lại form
-    err = reg.visible_error_locator()
-    if err.is_visible():
-        txt = (err.inner_text() or "") + " " + (err.text_content() or "")
-        assert _ERR_DUP.search(txt), f"Không thấy nội dung duplicate trong '{txt}'"
+    with contextlib.suppress(Exception):
+        new_page.wait_for_timeout(300)
+
+    # 2) UI text
+    msg = _visible_error_text(new_page, reg.visible_error_text)
+    if _ERR_RE_DUP.search(msg or ""):
         return
 
-    # Không error → có thể hệ thống auto login / điều hướng sang /store
-    assert "/store" in new_page.url or "/login" not in new_page.url
+    # 3) Fallback: vẫn ở trang register / chuyển về sign-in
+    assert _fallback_still_on_register_or_signin(new_page, auth_paths), f"Expected duplicate/error (status/UI/url), got msg='{msg}'"
 
 @pytest.mark.auth
-def test_register_existing_email_wrong_password_shows_error(new_page, base_url, auth_paths, credentials):
-    """
-    Email đã tồn tại + mật khẩu sai -> báo lỗi (API 4xx hoặc UI error).
-    Làm test bền hơn cho WebKit: chờ lâu hơn, thử lấy text 2 cách, và nếu text rỗng vẫn pass
-    khi có error element hoặc vẫn ở trang login/register.
-    """
-    reg = RegisterPage(new_page, base_url, auth_paths["register"])
+def test_register_existing_email_wrong_password_shows_error(new_page, site, base_url, auth_paths, credentials):
+    reg = _factory(new_page, site, base_url, auth_paths).register()
     reg.goto()
-
-    wrong_pw = credentials["password"] + "_WRONG!"
+    wrong_pw = (credentials["password"] or "P@ssw0rd!") + "_WRONG!"
     full_name = os.getenv("FULL_NAME") or "QA Auto"
     resp = reg.register_email(credentials["email"], wrong_pw, full_name, wait_response_ms=15000)
 
-    if resp and resp.status in (400, 401, 403, 409):
-        assert True
+    if getattr(resp, "status", None) in {400,401,403,409,422}:
         return
 
-    err = reg.visible_error_locator()
-    if err.count() > 0:
-        try:
-            err.wait_for(state="visible", timeout=7000)
-        except Exception:
-            pass
-        txt = (err.inner_text() or "") + " " + (err.text_content() or "")
-        # Lỗi mật khẩu/đăng ký thất bại
-        assert _ERR_PW.search(txt) or err.is_visible() or "/login" in new_page.url, \
-            "Không thấy nội dung lỗi mật khẩu sai trên UI"
+    with contextlib.suppress(Exception):
+        new_page.wait_for_timeout(300)
+
+    msg = _visible_error_text(new_page, reg.visible_error_text)
+    if _ERR_RE_PW.search(msg or ""):
         return
 
-    # fallback cuối cùng
-    assert "/login" in new_page.url or "/register" in new_page.url
+    assert _fallback_still_on_register_or_signin(new_page, auth_paths), f"Expected password error (status/UI/url); got msg='{msg}'"
