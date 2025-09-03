@@ -77,21 +77,21 @@ _LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
 PUBLIC_ROUTES    = _env_list("PUBLIC_ROUTES", "/login")
 PROTECTED_ROUTES = _env_list("PROTECTED_ROUTES", "/store,/profile,/wallet")
 
-# Gom thành một danh sách case duy nhất để tránh double-parametrize
+# Gom thành một danh sách case duy nhất để tránh mọi “double-parametrize”
 CASES = (
     [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] +
     [{"kind": "protected", "path": p} for p in PROTECTED_ROUTES]
 )
 
-# ===================== tests =====================
+# ===================== single test suite =====================
 @pytest.mark.smoke
 @pytest.mark.parametrize("case", CASES, ids=lambda c: f"{c['kind']}:{c['path']}")
 def test_routes_access(new_page, base_url, case):
     """
     - public: mở được (nếu thực tế redirect về login → coi như protected và skip)
       riêng /login (và biến thể) được coi là public hợp lệ.
-    - protected: phải bị yêu cầu đăng nhập
-      (redirect sang /login hoặc vẫn đứng tại route nhưng hiện form login / trả 401/403).
+    - protected: phải bị yêu cầu đăng nhập (redirect sang /login hoặc vẫn đứng tại
+      route nhưng hiện form login / trả 401/403).
     """
     path = _norm(case["path"])
     url = f"{base_url}{path}"
@@ -103,10 +103,10 @@ def test_routes_access(new_page, base_url, case):
     final_url = new_page.url
 
     is_final_login = any(re.search(re.escape(v), final_url) for v in _LOGIN_VARIANTS)
-    is_target_login = any(path == v for v in _LOGIN_PATHS) or any(path == v for v in _LOGIN_VARIANTS)
+    is_target_login = path in _LOGIN_PATHS or path in _LOGIN_VARIANTS
 
     if case["kind"] == "public":
-        # Với /login (và biến thể) => final phải là một trong các login variants
+        # Với /login (và biến thể) => final phải là 1 trong các login variants
         if is_target_login:
             assert is_final_login, f"{path} là public login nhưng final không phải trang login: {final_url}"
             return
