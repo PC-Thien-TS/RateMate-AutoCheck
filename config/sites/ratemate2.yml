@@ -1,18 +1,18 @@
 # config/sites/ratemate2.yml
-base_url: "http://192.168.1.7:19070"
+base_url: https://store.ratemate.top
 
 auth_paths:
-  login: "/sign-in"
-  register: "/sign-up"
+  login: /login
+  register: /login  
 
-credentials:
-  # Để trống nếu không có; test_login_success sẽ tự skip khi thiếu
-  email: ""
-  password: ""
-
-locales: ["en"]
+locales: []          
 
 routes:
-  - "/sign-in"
-  - "/sign-up"
-  - "/home"
+  public:
+    - /login
+  protected:
+    - /store
+    - /profile
+    - /wallet
+    - /product
+    - /home
