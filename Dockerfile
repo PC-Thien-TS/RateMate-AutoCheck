@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# APT: dùng HTTPS + bật main/restricted/universe/multiverse + retry
+# APT: set mirror HTTPS + bật main/restricted/universe/multiverse + retry
 RUN set -eux; \
     printf '%s\n' \
       "deb https://azure.archive.ubuntu.com/ubuntu jammy main restricted universe multiverse" \
@@ -28,14 +28,11 @@ WORKDIR /app
 
 # Cài deps Python trước để tận dụng cache
 COPY requirements.txt /app/requirements.txt
-
-# Đảm bảo có playwright CLI (nếu requirements.txt chưa khai báo)
 RUN python -m pip install --upgrade pip setuptools wheel \
- && pip install --no-cache-dir -r requirements.txt \
- || true \
+ && pip install --no-cache-dir -r requirements.txt || true \
  && pip install --no-cache-dir "playwright>=1.48,<1.50"
 
-# Cài system deps cho Playwright theo distro (ổn định hơn tự liệt kê từng gói)
+# Cài system deps + browsers bằng Playwright (ổn định hơn tự liệt kê gói apt)
 RUN set -eux; \
     python -m playwright install-deps; \
     python -m playwright install chromium firefox webkit; \
@@ -60,6 +57,4 @@ ENV HOME=/home/app \
 COPY --chown=${UID}:${GID} . /app
 
 ENTRYPOINT ["dumb-init","--"]
-CMD ["pytest","-vv","tests",
-     "--browser","chromium","--browser","firefox","--browser","webkit",
-     "--screenshot=only-on-failure","--video=off","--tracing=retain-on-failure"]
+CMD ["pytest","-vv","tests","--browser","chromium","--browser","firefox","--browser","webkit","--screenshot=only-on-failure","--video=off","--tracing=retain-on-failure"]
