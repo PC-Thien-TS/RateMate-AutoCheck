@@ -9,12 +9,10 @@ def _ensure_leading_slash(p: str) -> str:
     p = (p or "").strip()
     if not p:
         return ""
-    if not p.startswith("/"):
-        p = "/" + p
-    return p
+    return p if p.startswith("/") else f"/{p}"
 
 def _norm(p: str) -> str:
-    """Chuẩn hóa path: thêm '/' đầu, bỏ bớt '/' cuối (trừ root)."""
+    """Chuẩn hóa path: thêm '/' đầu, bỏ '/' cuối (trừ root)."""
     p = _ensure_leading_slash(p)
     return "/" if p == "/" else re.sub(r"/+$", "", p)
 
@@ -63,7 +61,7 @@ def _is_login_like(page) -> bool:
 
 # ===================== config =====================
 TIMEOUT_MS = int(os.getenv("NAV_TIMEOUT_MS", "60000"))  # mặc định 60s
-STRICT_PROTECTED = (os.getenv("STRICT_PROTECTED", "").lower() in ("1", "true", "yes"))
+STRICT_PROTECTED = (os.getenv("STRICT_PROTECTED", "").strip().lower() in ("1", "true", "yes"))
 
 # login paths chấp nhận nhiều biến thể
 _LOGIN_PATHS = {
@@ -78,6 +76,9 @@ _LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
 # routes từ ENV (có mặc định an toàn)
 PUBLIC_ROUTES    = _env_list("PUBLIC_ROUTES", "/login")
 PROTECTED_ROUTES = _env_list("PROTECTED_ROUTES", "/store,/profile,/wallet")
+
+# Cho phép override tạm thời các protected route thành public (ví dụ: "/profile,/wallet")
+PUBLIC_OVERRIDES = set(_env_list("PUBLIC_OVERRIDES", ""))
 
 # Gom thành một danh sách case duy nhất để tránh mọi “double-parametrize”
 CASES = (
@@ -96,6 +97,7 @@ def test_routes_access(new_page, base_url, case):
       route nhưng hiện form login / trả 401/403).
       Nếu thực tế route đang mở công khai, mặc định SKIP (để không vỡ pipeline).
       Bật STRICT_PROTECTED=true để FAIL trong tình huống này.
+      Có thể khai báo PUBLIC_OVERRIDES để coi một số protected route là public.
     """
     path = _norm(case["path"])
     url = f"{base_url}{path}"
@@ -107,7 +109,7 @@ def test_routes_access(new_page, base_url, case):
     final_url = new_page.url
 
     is_final_login = any(re.search(re.escape(v), final_url) for v in _LOGIN_VARIANTS)
-    is_target_login = path in _LOGIN_PATHS or path in _LOGIN_VARIANTS
+    is_target_login = (path in _LOGIN_PATHS) or (path in _LOGIN_VARIANTS)
 
     if case["kind"] == "public":
         # Với /login (và biến thể) => final phải là 1 trong các login variants
@@ -125,6 +127,15 @@ def test_routes_access(new_page, base_url, case):
         return
 
     # ---- protected ----
+    # Cho phép override protected → public (tạm thời)
+    if path in PUBLIC_OVERRIDES:
+        # Nếu override thì hành vi như public
+        if is_final_login:
+            pytest.skip(f"override public {path} redirects to login (unexpected, but skipping): {final_url}")
+        ok = any(re.search(re.escape(v), final_url) for v in _variants(path))
+        assert ok, f"override public {path} final mismatch: {final_url}"
+        return
+
     if is_final_login:
         # Redirect đến login là đúng
         return
@@ -136,7 +147,7 @@ def test_routes_access(new_page, base_url, case):
         if _is_login_like(new_page) or status in (401, 403):
             return
 
-    # Không redirect và cũng không thấy login gate -> coi như route đang mở công khai
+    # Không redirect và cũng không thấy login gate -> route đang mở công khai
     msg = f"{path} appears public (no redirect, no login gate); final: {final_url}"
     if STRICT_PROTECTED:
         raise AssertionError(
