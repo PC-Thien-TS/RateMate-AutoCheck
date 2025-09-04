@@ -131,9 +131,38 @@ def new_page(page):
 
 # ============ TỰ ĐỘNG PARAMETRIZE routes/locales ============
 def pytest_generate_tests(metafunc):
-    if "route" in metafunc.fixturenames:
+    """Tự param 'route'/'locale' nếu test CHƯA tự param; tránh duplicate."""
+    def _already_parametrized(argname: str) -> bool:
+        # Kiểm tra markers parametrize hiện có xem đã chứa argname chưa
+        try:
+            for m in metafunc.definition.iter_markers(name="parametrize"):
+                if not m.args:
+                    continue
+                # argnames có thể là chuỗi "a,b" hoặc list
+                argnames = m.args[0]
+                if isinstance(argnames, str):
+                    names = [s.strip() for s in argnames.split(",")]
+                else:
+                    names = list(argnames)
+                if argname in names:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _safe_param(name: str, values, ids):
+        try:
+            metafunc.parametrize(name, values, ids=ids)
+        except ValueError as e:
+            # Trường hợp đã bị nơi khác param rồi -> bỏ qua để tránh fail
+            if f"duplicate parametrization of '{name}'" in str(e):
+                return
+            raise
+
+    if "route" in metafunc.fixturenames and not _already_parametrized("route"):
         _routes = _active_site_cfg()[5]
-        metafunc.parametrize("route", _routes, ids=_routes or ["<no-routes>"])
-    if "locale" in metafunc.fixturenames:
+        _safe_param("route", _routes, ids=_routes or ["<no-routes>"])
+
+    if "locale" in metafunc.fixturenames and not _already_parametrized("locale"):
         _locales = _active_site_cfg()[4]
-        metafunc.parametrize("locale", _locales, ids=_locales or ["default"])
+        _safe_param("locale", _locales, ids=_locales or ["default"])
