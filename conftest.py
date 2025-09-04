@@ -2,22 +2,15 @@
 import os
 import pathlib
 import pytest
-
-# dotenv là optional: nếu không có thì bỏ qua để tránh crash
-try:
-    from dotenv import load_dotenv
-except Exception:  # pragma: no cover
-    def load_dotenv(*args, **kwargs):  # type: ignore
-        return False
+from dotenv import load_dotenv
 
 try:
     import yaml
-except Exception:  # pragma: no cover
+except Exception:
     yaml = None
 
-load_dotenv()  # đọc .env nếu có
+load_dotenv()
 
-# ---------- helpers ----------
 def _split_csv(val, default="en"):
     return [s.strip() for s in (val or default).split(",") if s.strip()]
 
@@ -39,7 +32,7 @@ def _load_yaml_for_site(site: str):
 
 def _cfg_from_yaml(data: dict):
     base_url = (data.get("base_url") or "").rstrip("/")
-    assert base_url, "Thiếu base_url trong YAML"
+    assert base_url, f"Thiếu base_url trong YAML"
 
     auth_paths = data.get("auth_paths") or {}
     login_path = auth_paths.get("login") or "/login"
@@ -54,7 +47,6 @@ def _cfg_from_yaml(data: dict):
 
     return base_url, {"login": login_path, "register": register_path}, {"email": email, "password": password}, locales, routes
 
-# ======== Fallback ENV-only (nếu không có YAML) ========
 def _cfg_ratemate_env_only():
     env = (os.getenv("ENV") or "prod").lower()
     if env == "staging":
@@ -76,13 +68,7 @@ def _cfg_ratemate_env_only():
     routes = _routes_from_env("SMOKE_ROUTES", ["/en/login", "/en/store", "/en/product", "/en/QR"])
     return base_url, auth_paths, credentials, locales, routes
 
-# ======== Active site selector (YAML-first) ========
 def _active_site_cfg():
-    """
-    Trả về tuple: (site, base_url, auth_paths, credentials, locales, routes)
-    - Ưu tiên file YAML: config/sites/{SITE}.yml
-    - Fallback: biến môi trường (kiểu cũ)
-    """
     site = _site_name()
     y = _load_yaml_for_site(site)
     if y:
@@ -91,7 +77,6 @@ def _active_site_cfg():
     base_url, auth_paths, credentials, locales, routes = _cfg_ratemate_env_only()
     return site, base_url, auth_paths, credentials, locales, routes
 
-# ================== PYTEST META ==================
 def pytest_configure(config):
     site, base_url, *_ = _active_site_cfg()
     md = getattr(config, "_metadata", None)
@@ -100,7 +85,6 @@ def pytest_configure(config):
         md["ENV"] = os.getenv("ENV", "prod")
         md["Base URL"] = base_url
 
-# ================ Fixtures =================
 @pytest.fixture(scope="session")
 def site():
     return _active_site_cfg()[0]
@@ -129,40 +113,24 @@ def routes():
 def new_page(page):
     return page
 
-# ============ TỰ ĐỘNG PARAMETRIZE routes/locales ============
+def _already_parametrized(metafunc, arg: str) -> bool:
+    # Nếu test đã có @pytest.mark.parametrize(..., include arg) thì không auto-param nữa
+    for m in metafunc.definition.iter_markers(name="parametrize"):
+        if not m.args:
+            continue
+        names = m.args[0]
+        if isinstance(names, str):
+            argnames = [n.strip() for n in names.split(",")]
+        else:
+            argnames = [str(n) for n in names]
+        if arg in argnames:
+            return True
+    return False
+
 def pytest_generate_tests(metafunc):
-    """Tự param 'route'/'locale' nếu test CHƯA tự param; tránh duplicate."""
-    def _already_parametrized(argname: str) -> bool:
-        # Kiểm tra markers parametrize hiện có xem đã chứa argname chưa
-        try:
-            for m in metafunc.definition.iter_markers(name="parametrize"):
-                if not m.args:
-                    continue
-                # argnames có thể là chuỗi "a,b" hoặc list
-                argnames = m.args[0]
-                if isinstance(argnames, str):
-                    names = [s.strip() for s in argnames.split(",")]
-                else:
-                    names = list(argnames)
-                if argname in names:
-                    return True
-        except Exception:
-            pass
-        return False
-
-    def _safe_param(name: str, values, ids):
-        try:
-            metafunc.parametrize(name, values, ids=ids)
-        except ValueError as e:
-            # Trường hợp đã bị nơi khác param rồi -> bỏ qua để tránh fail
-            if f"duplicate parametrization of '{name}'" in str(e):
-                return
-            raise
-
-    if "route" in metafunc.fixturenames and not _already_parametrized("route"):
+    if "route" in metafunc.fixturenames and not _already_parametrized(metafunc, "route"):
         _routes = _active_site_cfg()[5]
-        _safe_param("route", _routes, ids=_routes or ["<no-routes>"])
-
-    if "locale" in metafunc.fixturenames and not _already_parametrized("locale"):
+        metafunc.parametrize("route", _routes, ids=_routes or ["<no-routes>"])
+    if "locale" in metafunc.fixturenames and not _already_parametrized(metafunc, "locale"):
         _locales = _active_site_cfg()[4]
-        _safe_param("locale", _locales, ids=_locales or ["default"])
+        metafunc.parametrize("locale", _locales, ids=_locales or ["default"])
