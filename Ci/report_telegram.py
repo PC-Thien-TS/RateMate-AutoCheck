@@ -37,7 +37,6 @@ def _short(txt: str, lim: int = 220) -> str:
     return s[:lim]
 
 def parse_junit(path: str):
-    """Đọc JUnit XML. Nếu không có file -> trả về số liệu 0 thay vì raise để job không fail."""
     p = Path(path)
     if not p.exists():
         return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0}, [], [], []
@@ -110,10 +109,6 @@ def format_message(summary, fails, errs, passes, report_url=""):
     return "\n".join(lines)
 
 def _proxies():
-    """
-    Ưu tiên TELEGRAM_PROXY; fallback HTTPS_PROXY/HTTP_PROXY.
-    Cho phép 'http://host:port' hoặc 'host:port' -> tự prepend http://
-    """
     px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
     if not px:
         return None
@@ -122,7 +117,6 @@ def _proxies():
     return {"http": px, "https": px}
 
 def _send_chunked(text: str):
-    """Chia nhỏ và gửi nhiều tin nếu > 4096 ký tự."""
     if not TG_TOKEN or not TG_CHAT:
         print("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not provided; skip sending.")
         print(text)
