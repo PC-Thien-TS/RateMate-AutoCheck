@@ -1,4 +1,4 @@
-# ci/report_telegram.py
+# Ci/report_telegram.py
 import os, re, sys, json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -18,7 +18,7 @@ REPORT_URL = (
 )
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT  = os.getenv("TELEGRAM_CHAT_ID")
-MAX_TG_LEN = 4000  # safe margin < 4096
+MAX_TG_LEN = 4000  # < 4096
 
 # ===== Helpers =====
 def _short(txt: str, lim: int = 220) -> str:
@@ -37,10 +37,14 @@ def _short(txt: str, lim: int = 220) -> str:
     return s[:lim]
 
 def parse_junit(path: str):
-    """Parse JUnit XML; if not exists return zeroes (don’t raise)."""
     p = Path(path)
     if not p.exists():
-        return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0}, [], [], []
+        # Thử fallback: report/report/junit.xml (nếu lỡ copy thừa cấp)
+        p2 = Path("report/report/junit.xml")
+        if p2.exists():
+            p = p2
+        else:
+            return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0}, [], [], []
 
     root = ET.parse(p).getroot()
     suites = [root] if root.tag.endswith("testsuite") else root.findall(".//testsuite")
@@ -110,10 +114,6 @@ def format_message(summary, fails, errs, passes, report_url=""):
     return "\n".join(lines)
 
 def _proxies():
-    """
-    Prefer TELEGRAM_PROXY; fallback HTTPS_PROXY/HTTP_PROXY.
-    Allow 'host:port' -> auto prepend http://
-    """
     px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
     if not px:
         return None
@@ -122,7 +122,6 @@ def _proxies():
     return {"http": px, "https": px}
 
 def _send_chunked(text: str):
-    """Split and send multiple messages if > 4096 chars."""
     if not TG_TOKEN or not TG_CHAT:
         print("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not provided; skip sending.")
         print(text)
@@ -142,60 +141,39 @@ def _send_chunked(text: str):
         parts.append("\n".join(cur))
 
     for i, chunk in enumerate(parts, 1):
+        payload = {"chat_id": TG_CHAT, "text": chunk, "disable_web_page_preview": True}
         try:
-            r = requests.post(url, json={"chat_id": TG_CHAT, "text": chunk, "disable_web_page_preview": True},
-                              timeout=30, proxies=proxies)
+            r = requests.post(url, json=payload, timeout=30, proxies=proxies)
             r.raise_for_status()
-        except requests.ReadTimeout:
-            # thử lại không proxy
+        except Exception as e:
             print("[telegram] proxy failed (ReadTimeout), retrying direct...")
-            r = requests.post(url, json={"chat_id": TG_CHAT, "text": chunk, "disable_web_page_preview": True},
-                              timeout=30)
+            r = requests.post(url, json=payload, timeout=30)
             r.raise_for_status()
     print(f"Telegram sent OK ({len(parts)} message{'s' if len(parts) > 1 else ''}).")
-
-def _looks_empty_summary(obj) -> bool:
-    try:
-        if not obj:
-            return True
-        if isinstance(obj, str):
-            s = obj.strip().lower()
-            if s in ("", "{}", "null"):
-                return True
-            obj = json.loads(obj)
-        # thiếu trường quan trọng
-        return not bool(obj.get("total"))
-    except Exception:
-        return True
 
 def main():
     junit_path = sys.argv[1] if len(sys.argv) > 1 else JUNIT
     summary_json = os.getenv("SUMMARY_JSON")
 
-    use_junit = False
-    if _looks_empty_summary(summary_json):
-        use_junit = True
-
-    if not use_junit:
+    summary = None; fails = []; errs = []; passes = []
+    if summary_json:
         try:
             obj = json.loads(summary_json) if isinstance(summary_json, str) else summary_json
-            summary = {
-                "tests": int(obj.get("total", 0)),
-                "failures": int(obj.get("fail", 0)),
-                "errors": int(obj.get("error", 0)),
-                "skipped": int(obj.get("skip", 0)),
-                "time": float(obj.get("duration", 0.0)),
-            }
-            fails = [{"name": f.get("name", ""), "why": _short(f.get("reason", ""))} for f in obj.get("fails", [])]
-            errs, passes = [], []
+            # Nếu obj rỗng ({}), coi như KHÔNG có summary → fallback XML
+            if obj and isinstance(obj, dict) and any(k in obj for k in ("total","tests")):
+                summary = {
+                    "tests": int(obj.get("total", obj.get("tests", 0))),
+                    "failures": int(obj.get("fail", obj.get("failures", 0))),
+                    "errors": int(obj.get("error", obj.get("errors", 0))),
+                    "skipped": int(obj.get("skip", obj.get("skipped", 0))),
+                    "time": float(obj.get("duration", obj.get("time", 0.0))),
+                }
+                fails = [{"name": f.get("name", ""), "why": _short(f.get("reason", ""))} for f in obj.get("fails", [])]
+                errs, passes = [], []
         except Exception:
-            use_junit = True
+            summary = None
 
-    if use_junit:
-        summary, fails, errs, passes = parse_junit(junit_path)
-
-    # Nếu vẫn là 0 nhưng file tồn tại, thử parse lại (phòng trường hợp ghi file chậm)
-    if summary.get("tests", 0) == 0 and Path(junit_path).exists():
+    if summary is None:
         summary, fails, errs, passes = parse_junit(junit_path)
 
     msg = format_message(summary, fails, errs, passes, REPORT_URL)
