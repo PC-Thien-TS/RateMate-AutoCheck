@@ -1,20 +1,14 @@
-# Test stack
+# Core
 pytest==8.3.3
-pytest-html==4.1.1
-pytest-metadata==3.1.1
-pytest-excel==1.7.0
-pytest-base-url==2.1.0
+requests
+
+# Playwright
+playwright
 pytest-playwright==0.5.0
 
-# Playwright core
-playwright==1.46.0
-
-# Tiện ích (pin bản ổn định cho py3.10)
-numpy==1.26.4
-pandas==2.1.4
-openpyxl==3.1.2
-pyyaml==6.0.2
-python-dotenv==1.0.1
-pytest-rerunfailures==13.0
-pytest-xdist==3.6.1
-PyYAML>=6.0
+# Pytest plugins bạn đã dùng trong log
+pytest-html
+pytest-xdist
+pytest-rerunfailures
+pytest-base-url
+# pytest-excel  (chỉ cần nếu chạy local; trên CI bạn đã tắt bằng -p no:pytest_excel)
