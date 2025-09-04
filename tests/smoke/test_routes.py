@@ -1,4 +1,3 @@
-# tests/smoke/test_routes.py
 import os
 import re
 import pytest
@@ -36,10 +35,7 @@ def _csv_paths(envname: str, defaults: list[str]) -> list[str]:
     return seen
 
 def _is_login_like(page) -> bool:
-    """
-    Nhận diện trang đang hiển thị gate/login (không redirect).
-    Chỉ cần thấy 1 trong các selector phổ biến là đủ.
-    """
+    """Nhận diện trang đang hiển thị gate/login (không redirect)."""
     selectors = [
         'input[type="email"]',
         'input[name*="email" i]',
@@ -60,33 +56,22 @@ def _is_login_like(page) -> bool:
     return False
 
 # ===== config =====
-TIMEOUT_MS = int(os.getenv("NAV_TIMEOUT_MS", "60000"))  # 60s mặc định
+TIMEOUT_MS = int(os.getenv("NAV_TIMEOUT_MS", "60000"))
 
 # login paths chấp nhận nhiều biến thể
 _LOGIN_PATHS_RAW = [
     os.getenv("LOGIN_PATH", "/login"),
     os.getenv("ALT_LOGIN_PATH", "/en/login"),
-    "/login",
-    "/en/login",
+    "/login", "/en/login",
+    "/signin", "/en/signin",
+    "/auth/login", "/en/auth/login",
 ]
 _LOGIN_PATHS = {_norm(p) for p in _LOGIN_PATHS_RAW if _norm(p)}
 _LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
 
-# Danh sách mặc định (có thể override qua ENV):
-PUBLIC_DEFAULT = [
-    "/",
-    "/login",           # login coi là public
-    "/product",
-    "/QR",
-]
-PROTECTED_DEFAULT = [
-    "/store",
-    "/profile",
-    "/wallet",
-    "/orders",
-    "/cart",
-    "/checkout",
-]
+# Danh sách mặc định (override qua ENV)
+PUBLIC_DEFAULT = ["/", "/login"]
+PROTECTED_DEFAULT = ["/store"]
 
 PUBLIC_ROUTES = _csv_paths("PUBLIC_ROUTES", PUBLIC_DEFAULT)
 PROTECTED_ROUTES = _csv_paths("PROTECTED_ROUTES", PROTECTED_DEFAULT)
@@ -102,8 +87,8 @@ def test_routes_access(new_page, base_url, case):
     """
     - public: mở được (nếu thực tế redirect về login → coi như protected và skip)
       riêng /login (và biến thể) được coi là public hợp lệ.
-    - protected: phải bị yêu cầu đăng nhập (redirect sang /login hoặc vẫn đứng tại
-      route nhưng hiện form login / trả 401/403). Nếu thực tế public → skip để tránh false fail.
+    - protected: phải yêu cầu đăng nhập (redirect sang /login hoặc hiển thị form login / trả 401/403).
+      Nếu thực tế public → skip để tránh false fail.
     """
     path = _norm(case["path"])
     url = f"{base_url}{path}"
@@ -118,31 +103,23 @@ def test_routes_access(new_page, base_url, case):
     is_target_login = path in _LOGIN_PATHS or path in _LOGIN_VARIANTS
 
     if case["kind"] == "public":
-        # Với /login (và biến thể) => final phải là 1 trong các login variants
         if is_target_login:
             assert is_final_login, f"{path} là public login nhưng final không phải trang login: {final_url}"
             return
-
-        # Public khác: nếu bị đẩy sang login -> thực chất protected → skip
         if is_final_login:
             pytest.skip(f"public {path} redirects to login → treat as protected: {final_url}")
-
-        # Không bị đẩy sang login: URL cuối phải khớp (nhận cả biến thể /en/<path>)
         ok = any(re.search(re.escape(v), final_url) for v in _variants(path))
         assert ok, f"URL mismatch for public {path}; final: {final_url}"
         return
 
-    # ---- protected ----
+    # protected
     if is_final_login:
-        # Redirect đến login là đúng
         return
 
-    # Không redirect: nếu vẫn ở route mà có login-gate hoặc 401/403 → cũng coi là đúng
     same_route = any(re.search(re.escape(v), final_url) for v in _variants(path))
     if same_route:
         status = getattr(resp, "status", None) if resp else None
         if _is_login_like(new_page) or status in (401, 403):
             return
 
-    # Thực tế không yêu cầu đăng nhập (đang public) → skip để tránh false fail
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")

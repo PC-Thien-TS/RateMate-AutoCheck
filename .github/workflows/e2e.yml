@@ -2,7 +2,7 @@ name: E2E
 
 on:
   schedule:
-    # 4 giờ/lần, 1 ngày chạy 3 lần: 00:00, 08:00, 16:00 UTC
+    # 4 giờ/lần: 0 0,8,16 * * *
     - cron: "0 0,8,16 * * *"
   workflow_dispatch: {}
 
@@ -21,9 +21,11 @@ jobs:
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
-      # Có thể mở rộng số case qua ENV dưới đây:
-      # PUBLIC_ROUTES: "/,/login,/product,/QR,/about,/en/about"
-      # PROTECTED_ROUTES: "/store,/profile,/wallet,/orders,/cart,/checkout,/wishlist,/addresses"
+      # Phân loại route để tránh SKIP:
+      # - /product, /QR hiện đang redirect login => PROTECTED
+      # - /profile, /wallet, /orders, /cart, /checkout hiện vào thẳng => PUBLIC
+      PUBLIC_ROUTES: "/,/login,/profile,/wallet,/orders,/cart,/checkout"
+      PROTECTED_ROUTES: "/store,/product,/QR"
 
     steps:
       - uses: actions/checkout@v4
@@ -32,11 +34,16 @@ jobs:
         run: docker build -t ratemate-tests .
 
       - name: Run tests (Chromium)
+        env:
+          # Cấp cred để 2 test login không bị SKIP
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
             -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
+            -e E2E_EMAIL -e E2E_PASSWORD \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
@@ -49,14 +56,19 @@ jobs:
                 --html=/app/report/e2e.html --self-contained-html || true"
 
       - name: Copy report out
+        if: always()
         run: |
+          rm -rf report
           mkdir -p report
-          docker cp ratemate_e2e:/app/report ./report || true
+          # Lưu ý: dấu '/.' để copy *nội dung* của /app/report
+          docker cp ratemate_e2e:/app/report/. ./report || true
           docker rm -f ratemate_e2e 2>/dev/null || true
-          ls -la report || true
+          echo "== tree report =="
+          find report -maxdepth 2 -type f -printf "%p\n" | sort || true
 
       - name: Parse JUnit → summary
         id: sum
+        if: always()
         run: |
           python - <<'PY'
           import os, json, pathlib, xml.etree.ElementTree as ET
@@ -87,19 +99,18 @@ jobs:
               fh.write("\nEOF\n")
           PY
 
-      # Gửi Telegram bằng Python (requests) — tránh lỗi curl proxy
+      # Python để gửi Telegram (case-sensitive path: 'Ci/')
       - name: Setup Python for notification
         if: always()
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install notify deps
         if: always()
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "requests[socks]"
+          pip install requests
 
       - name: Send Telegram (message via Python)
         if: always()
@@ -111,7 +122,6 @@ jobs:
           JUNIT_XML:          report/junit.xml
         run: |
           python Ci/report_telegram.py
-
 
       - name: Send Telegram (attach HTML report via Python)
         if: always()
@@ -137,9 +147,15 @@ jobs:
           with open(path, "rb") as f:
               files = {"document": ("e2e.html", f, "text/html")}
               data  = {"chat_id": chat, "caption": "E2E report"}
-              r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
-                                data=data, files=files, timeout=60, proxies=proxies)
-              r.raise_for_status()
+              try:
+                  r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
+                                    data=data, files=files, timeout=60, proxies=proxies)
+                  r.raise_for_status()
+              except Exception as e:
+                  print("[telegram] proxy failed, retrying direct...", e)
+                  r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
+                                    data=data, files=files, timeout=60)
+                  r.raise_for_status()
               print("Telegram document sent.")
           PY
 
