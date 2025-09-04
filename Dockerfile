@@ -1,4 +1,4 @@
-# Dockerfile — chạy đủ Chromium/Firefox/WebKit, không cần MCR
+# Dockerfile — Image chạy đủ Chromium/Firefox/WebKit cho Playwright (không cần MCR)
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -9,40 +9,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# APT bước 1: dùng HTTP để cài ca-certificates trước (tránh lỗi HTTPS ban đầu)
+# APT & toolchain cơ bản + system deps cho browsers
 RUN set -eux; \
-    printf '%s\n' \
-      "deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse" \
-      "deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse" \
-      "deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse" \
-      > /etc/apt/sources.list; \
     echo 'Acquire::Retries "5"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' >/etc/apt/apt.conf.d/80retry; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl; \
-    update-ca-certificates
-
-# APT bước 2: chuyển sang HTTPS + cài Python & tools
-RUN set -eux; \
-    printf '%s\n' \
-      "deb https://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse" \
-      "deb https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse" \
-      "deb https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse" \
-      > /etc/apt/sources.list; \
-    apt-get update; \
+    # Base tools trước (cài ca-certificates sớm để HTTPS ổn định)
     apt-get install -y --no-install-recommends \
-      git bash dumb-init tzdata \
+      ca-certificates curl git bash dumb-init tzdata \
       python3 python3-pip python3-venv python-is-python3; \
-    rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Cài deps Python trước để tận dụng cache
-COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --upgrade pip && pip install -r requirements.txt
-
-# System deps cho browsers (Chromium/Firefox/WebKit)
-RUN set -eux; \
-    apt-get update; \
+    # System deps cho Playwright browsers
     apt-get install -y --no-install-recommends \
       libasound2 \
       libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
@@ -51,15 +26,26 @@ RUN set -eux; \
       libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 \
       libxrandr2 libxkbcommon0 libxshmfence1 libxext6 libxfixes3 libxrender1 \
       libxss1; \
-    (apt-get install -y --no-install-recommends fonts-liberation) || apt-get install -y --no-install-recommends fonts-liberation2; \
-    (apt-get install -y --no-install-recommends libicu70) || apt-get install -y --no-install-recommends libicu-dev; \
+    # fonts-liberation có mirror cũ -> fallback sang fonts-liberation2
+    (apt-get install -y --no-install-recommends fonts-liberation) \
+      || apt-get install -y --no-install-recommends fonts-liberation2; \
+    # libicu trên jammy là 70; fallback sang libicu-dev nếu thiếu binary exact
+    (apt-get install -y --no-install-recommends libicu70) \
+      || apt-get install -y --no-install-recommends libicu-dev; \
     rm -rf /var/lib/apt/lists/*
 
-# Cài browsers Playwright
-RUN python -m playwright install --with-deps chromium firefox webkit \
+WORKDIR /app
+
+# Cài deps Python trước để tận dụng cache
+COPY requirements.txt /app/requirements.txt
+RUN python3 -m pip install --upgrade pip && pip install -r requirements.txt
+
+# Cài browsers ở build-time (đang quyền root)
+# Đã cài sẵn system deps nên KHÔNG cần --with-deps (tránh apt bên trong)
+RUN python3 -m playwright install chromium firefox webkit \
  && mkdir -p /ms-playwright && chmod -R a+rX /ms-playwright
 
-# Tạo user thường
+# Tạo user thường (bảo mật hơn lúc runtime)
 ARG UID=10001
 ARG GID=10001
 RUN groupadd -g ${GID} app && useradd -m -u ${UID} -g ${GID} app \
@@ -74,7 +60,7 @@ ENV HOME=/home/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# Mã nguồn (khi chạy thực tế sẽ bị bind-mount từ host)
+# Copy mã nguồn (khi chạy CI có thể bind-mount/override)
 COPY --chown=${UID}:${GID} . /app
 
 ENTRYPOINT ["dumb-init","--"]

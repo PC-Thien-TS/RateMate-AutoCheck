@@ -2,11 +2,17 @@
 import os
 import pathlib
 import pytest
-from dotenv import load_dotenv
+
+# dotenv là optional: nếu không có thì bỏ qua để tránh crash
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    def load_dotenv(*args, **kwargs):  # type: ignore
+        return False
 
 try:
     import yaml
-except Exception:
+except Exception:  # pragma: no cover
     yaml = None
 
 load_dotenv()  # đọc .env nếu có
@@ -33,7 +39,7 @@ def _load_yaml_for_site(site: str):
 
 def _cfg_from_yaml(data: dict):
     base_url = (data.get("base_url") or "").rstrip("/")
-    assert base_url, f"Thiếu base_url trong YAML"
+    assert base_url, "Thiếu base_url trong YAML"
 
     auth_paths = data.get("auth_paths") or {}
     login_path = auth_paths.get("login") or "/login"

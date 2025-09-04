@@ -112,7 +112,7 @@ def format_message(summary, fails, errs, passes, report_url=""):
 def _proxies():
     """
     Ưu tiên TELEGRAM_PROXY; fallback HTTPS_PROXY/HTTP_PROXY.
-    Cho phép 'http://host:port' hoặc 'host:port' -> tự prepand http://
+    Cho phép 'http://host:port' hoặc 'host:port' -> tự prepend http://
     """
     px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
     if not px:

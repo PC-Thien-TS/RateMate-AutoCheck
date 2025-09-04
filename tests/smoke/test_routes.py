@@ -13,27 +13,12 @@ def _norm(p: str) -> str:
         s = "/" + s
     return re.sub(r"/+$", "", s)
 
-def _csv_list(envname: str, default_csv: str) -> list[str]:
-    raw = (os.getenv(envname) or default_csv).strip()
-    items = [x.strip() for x in raw.split(",") if x.strip()]
-    seen = []
-    for it in items:
-        if it not in seen:
-            seen.append(it)
-    return seen
-
-# locales prefix cho các path (vd: en,vi → /en/x, /vi/x)
-_LOCALES = _csv_list("ROUTE_LOCALES", "en")
-
 def _variants(path: str):
-    """Trả về các biến thể hợp lệ của 1 path: /x và /<locale>/x."""
+    """Trả về các biến thể hợp lệ của 1 path: /x và /en/x."""
     s = _norm(path)
     out = {s}
-    for loc in _LOCALES:
-        if not loc:
-            continue
-        loc = loc.strip("/")
-        out.add(f"/{loc}{s}")
+    if s and not s.startswith("/en/"):
+        out.add(f"/en{s}")
     return out
 
 def _csv_paths(envname: str, defaults: list[str]) -> list[str]:
@@ -85,11 +70,7 @@ _LOGIN_PATHS_RAW = [
     "/en/login",
 ]
 _LOGIN_PATHS = {_norm(p) for p in _LOGIN_PATHS_RAW if _norm(p)}
-
-# sinh login variants có cả tiền tố locale
-_LOGIN_VARIANTS = set()
-for p in _LOGIN_PATHS:
-    _LOGIN_VARIANTS.update(_variants(p))
+_LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
 
 # Danh sách mặc định (có thể override qua ENV):
 PUBLIC_DEFAULT = [
@@ -146,7 +127,7 @@ def test_routes_access(new_page, base_url, case):
         if is_final_login:
             pytest.skip(f"public {path} redirects to login → treat as protected: {final_url}")
 
-        # Không bị đẩy sang login: URL cuối phải khớp (nhận cả biến thể /<locale>/<path>)
+        # Không bị đẩy sang login: URL cuối phải khớp (nhận cả biến thể /en/<path>)
         ok = any(re.search(re.escape(v), final_url) for v in _variants(path))
         assert ok, f"URL mismatch for public {path}; final: {final_url}"
         return

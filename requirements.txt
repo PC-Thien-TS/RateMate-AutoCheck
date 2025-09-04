@@ -1,14 +1,21 @@
-# Core
+# Test stack
 pytest==8.3.3
-requests
+pytest-xdist==3.6.1
+pytest-rerunfailures==13.0
+pytest-metadata==3.1.1
+pytest-html==4.1.1
+pytest-base-url==2.1.0
 
 # Playwright
-playwright
 pytest-playwright==0.5.0
+playwright==1.47.2
 
-# Pytest plugins bạn đã dùng trong log
-pytest-html
-pytest-xdist
-pytest-rerunfailures
-pytest-base-url
-# pytest-excel  (chỉ cần nếu chạy local; trên CI bạn đã tắt bằng -p no:pytest_excel)
+# Optional plugin (đang disable trong CI bằng -p no:pytest_excel)
+pytest-excel==1.7.0
+
+# YAML & env
+PyYAML>=6.0.1
+python-dotenv>=1.0.1
+
+# Telegram sender
+requests>=2.31.0
