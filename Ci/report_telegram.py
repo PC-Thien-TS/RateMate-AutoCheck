@@ -109,7 +109,7 @@ jobs:
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
           JUNIT_XML:          report/junit.xml
         run: |
-          python Ci/report_telegram.py
+          python ci/report_telegram.py
 
       - name: Send Telegram (attach HTML report via Python)
         if: always()
