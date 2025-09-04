@@ -43,7 +43,6 @@ def parse_junit(path: str):
         return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0}, [], [], []
 
     root = ET.parse(p).getroot()
-    # Hỗ trợ <testsuite> hoặc <testsuites>
     suites = [root] if root.tag.endswith("testsuite") else root.findall(".//testsuite")
 
     summary = dict(tests=0, failures=0, errors=0, skipped=0, time=0.0)
@@ -73,7 +72,6 @@ def parse_junit(path: str):
                 msg = err.attrib.get("message") or (err.text or "")
                 errs.append({"name": full, "why": _short(msg)})
             elif skp is not None:
-                # chỉ thống kê
                 pass
             else:
                 passes.append(full)
@@ -149,12 +147,8 @@ def _send_chunked(text: str):
         r.raise_for_status()
     print(f"Telegram sent OK ({len(parts)} message{'s' if len(parts) > 1 else ''}).")
 
-# ===== Main =====
 def main():
-    # Cho phép override đường dẫn JUnit qua argv[1]
     junit_path = sys.argv[1] if len(sys.argv) > 1 else JUNIT
-
-    # Ưu tiên SUMMARY_JSON nếu có (định dạng: {"total","fail","error","skip","duration","fails":[{"name","reason"}]})
     summary_json = os.getenv("SUMMARY_JSON")
     if summary_json:
         try:

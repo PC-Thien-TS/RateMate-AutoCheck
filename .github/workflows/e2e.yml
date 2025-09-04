@@ -1,8 +1,9 @@
 name: E2E
 
 on:
+  # chạy 3 lần/ngày (UTC 01:00, 05:00, 09:00) — chỉnh lịch theo nhu cầu
   schedule:
-    - cron: "*/10 * * * *"    # 10 phút/lần
+    - cron: "0 1,5,9 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -14,12 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SITE: ratemate          # đổi qua "ratemate2" khi cần
+      SITE: ratemate
       ENV: prod
       BASE_URL_PROD: https://store.ratemate.top
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
+      # mở rộng case qua ENV (tuỳ chọn)
+      PUBLIC_ROUTES: "/,/login,/product,/QR,/about,/contact"
+      PROTECTED_ROUTES: "/store,/profile,/wallet,/orders,/cart,/checkout,/address"
+      ROUTE_LOCALES: "en,vi"
+      NAV_TIMEOUT_MS: "60000"
 
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +38,7 @@ jobs:
           docker rm -f ratemate_e2e 2>/dev/null || true
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
+            -e PUBLIC_ROUTES -e PROTECTED_ROUTES -e ROUTE_LOCALES -e NAV_TIMEOUT_MS \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
@@ -61,14 +68,8 @@ jobs:
               t = ET.parse(p).getroot()
               ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
               def g(a): return int(ts.get(a, "0"))
-              out = {
-                  "total": g("tests"),
-                  "fail": g("failures"),
-                  "error": g("errors"),
-                  "skip": g("skipped"),
-                  "duration": float(ts.get("time","0")),
-                  "fails": [],
-              }
+              out = {"total": g("tests"), "fail": g("failures"), "error": g("errors"),
+                     "skip": g("skipped"), "duration": float(ts.get("time","0")), "fails":[]}
               for tc in ts.findall(".//testcase"):
                   fe = tc.find("failure") or tc.find("error")
                   if fe is not None:
@@ -82,60 +83,15 @@ jobs:
               fh.write("\nEOF\n")
           PY
 
-      - name: Send Telegram (message)
+      - name: Send Telegram (message via Python)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}  # có thể để trống
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
-        run: |
-          python - <<'PY'
-          import os, json, subprocess, xml.etree.ElementTree as ET, pathlib
-          raw = os.getenv("SUMMARY_JSON") or "{}"
-          d = json.loads(raw)
-          if not d:
-              p = pathlib.Path("report/junit.xml")
-              if p.exists():
-                  t = ET.parse(p).getroot()
-                  ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-                  def g(a): return int(ts.get(a,"0"))
-                  d = {"total": g("tests"), "fail": g("failures"), "error": g("errors"),
-                       "skip": g("skipped"), "duration": float(ts.get("time","0")), "fails":[]}
-                  for tc in ts.findall(".//testcase"):
-                      fe = tc.find("failure") or tc.find("error")
-                      if fe is not None:
-                          name=f"{tc.get('classname','')}.{tc.get('name')}"
-                          msg=(fe.get('message') or '').strip()
-                          txt=(fe.text or '').strip()
-                          d["fails"].append({"name":name,"reason":(msg or txt or 'No message')[:400]})
-          total=d.get("total",0); fail=d.get("fail",0); err=d.get("error",0); skip=d.get("skip",0); dur=d.get("duration",0.0)
-          status = "✅" if fail==0 and err==0 else "❌"
-          lines = [
-              f"{status} E2E Result: {total} tests | pass={total-fail-err-skip} fail={fail} error={err} skip={skip}",
-              f"Duration: ~{dur:.1f}s",
-              f"Run: {os.getenv('GITHUB_SERVER_URL','')}/{os.getenv('GITHUB_REPOSITORY','')}/actions/runs/{os.getenv('GITHUB_RUN_ID','')}",
-          ]
-          if d.get("fails"):
-              lines.append("")
-              lines.append("❗ Failed cases:")
-              for f in d["fails"][:10]:
-                  lines.append(f"• {f['name']}")
-                  lines.append(f"  └─ {f['reason']}")
-          text = "\n".join(lines)
-
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat  = os.environ["TELEGRAM_CHAT_ID"]
-          url   = f"https://api.telegram.org/bot{token}/sendMessage"
-          payload = {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-
-          args = ["curl","-sS","-m","60","-X","POST","-H","Content-Type: application/json","-d",json.dumps(payload, ensure_ascii=False)]
-          if os.getenv("TELEGRAM_PROXY"):
-              args[1:1] = ["-x", os.environ["TELEGRAM_PROXY"]]
-          args.append(url)
-          res = subprocess.run(args, capture_output=True, text=True)
-          print("Telegram:", res.stdout or res.stderr)
-          PY
+          JUNIT_XML:          report/junit.xml
+        run: python ci/report_telegram.py
 
       - name: Send Telegram (attach HTML report)
         if: always()
