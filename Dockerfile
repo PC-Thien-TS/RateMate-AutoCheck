@@ -9,44 +9,62 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# --- APT bootstrap qua HTTP để cài ca-certificates trước (tránh lỗi TLS) ---
+# APT bước 1: dùng HTTP để cài ca-certificates trước (tránh lỗi HTTPS ban đầu)
 RUN set -eux; \
     printf '%s\n' \
       "deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse" \
       "deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse" \
       "deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse" \
       > /etc/apt/sources.list; \
-    echo 'Acquire::Retries "5"; Acquire::http::Timeout "30";' >/etc/apt/apt.conf.d/80retry; \
+    echo 'Acquire::Retries "5"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' >/etc/apt/apt.conf.d/80retry; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    update-ca-certificates
+
+# APT bước 2: chuyển sang HTTPS + cài Python & tools
+RUN set -eux; \
+    printf '%s\n' \
+      "deb https://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse" \
+      "deb https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse" \
+      "deb https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse" \
+      > /etc/apt/sources.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-      ca-certificates curl git bash dumb-init tzdata \
+      git bash dumb-init tzdata \
       python3 python3-pip python3-venv python-is-python3; \
-    update-ca-certificates; \
     rm -rf /var/lib/apt/lists/*
-
-# (Tuỳ chọn) Chuyển APT sang HTTPS sau khi đã có CA
-RUN set -eux; \
-    sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true; \
-    sed -i 's|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true; \
-    apt-get update || true
 
 WORKDIR /app
 
-# Cài deps Python trước để tận dụng cache layer
+# Cài deps Python trước để tận dụng cache
 COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 
-# Cài browsers + toàn bộ system deps cần thiết
-# Dùng --with-deps để Playwright tự cài lib hệ thống qua APT
+# System deps cho browsers (Chromium/Firefox/WebKit)
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      libasound2 \
+      libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+      libcups2 libdbus-1-3 libdrm2 libgbm1 \
+      libglib2.0-0 libgtk-3-0 libnss3 libnspr4 \
+      libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 \
+      libxrandr2 libxkbcommon0 libxshmfence1 libxext6 libxfixes3 libxrender1 \
+      libxss1; \
+    (apt-get install -y --no-install-recommends fonts-liberation) || apt-get install -y --no-install-recommends fonts-liberation2; \
+    (apt-get install -y --no-install-recommends libicu70) || apt-get install -y --no-install-recommends libicu-dev; \
+    rm -rf /var/lib/apt/lists/*
+
+# Cài browsers Playwright
 RUN python -m playwright install --with-deps chromium firefox webkit \
  && mkdir -p /ms-playwright && chmod -R a+rX /ms-playwright
 
-# Tạo user thường để chạy an toàn
+# Tạo user thường
 ARG UID=10001
 ARG GID=10001
 RUN groupadd -g ${GID} app && useradd -m -u ${UID} -g ${GID} app \
  && mkdir -p /home/app/.cache /home/app/.config /tmp/xdg \
- && chown -R ${UID}:${GID} /home/app /tmp/xdg /app
+ && chown -R ${UID}:${GID} /home/app /tmp/xdg
 
 USER ${UID}:${GID}
 ENV HOME=/home/app \
@@ -56,7 +74,7 @@ ENV HOME=/home/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# Mã nguồn (khi chạy thực tế có thể bind-mount từ host)
+# Mã nguồn (khi chạy thực tế sẽ bị bind-mount từ host)
 COPY --chown=${UID}:${GID} . /app
 
 ENTRYPOINT ["dumb-init","--"]

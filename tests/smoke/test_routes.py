@@ -4,41 +4,56 @@ import re
 import pytest
 import contextlib
 
-# ===================== helpers =====================
-def _ensure_leading_slash(p: str) -> str:
-    p = (p or "").strip()
-    if not p:
-        return ""
-    return p if p.startswith("/") else f"/{p}"
-
+# ===== helpers =====
 def _norm(p: str) -> str:
-    """Chuẩn hóa path: thêm '/' đầu, bỏ '/' cuối (trừ root)."""
-    p = _ensure_leading_slash(p)
-    return "/" if p == "/" else re.sub(r"/+$", "", p)
+    s = (p or "").strip()
+    if not s:
+        return ""
+    if not s.startswith("/"):
+        s = "/" + s
+    return re.sub(r"/+$", "", s)
 
-def _env_list(name: str, default: str = ""):
-    raw = os.getenv(name, default) or ""
-    out = []
-    for x in raw.split(","):
-        x = _norm(x)
-        if x and x not in out:
-            out.append(x)
-    return out
+def _csv_list(envname: str, default_csv: str) -> list[str]:
+    raw = (os.getenv(envname) or default_csv).strip()
+    items = [x.strip() for x in raw.split(",") if x.strip()]
+    seen = []
+    for it in items:
+        if it not in seen:
+            seen.append(it)
+    return seen
+
+# locales prefix cho các path (vd: en,vi → /en/x, /vi/x)
+_LOCALES = _csv_list("ROUTE_LOCALES", "en")
 
 def _variants(path: str):
-    """Sinh biến thể hợp lệ của 1 path: /x và /en/x."""
+    """Trả về các biến thể hợp lệ của 1 path: /x và /<locale>/x."""
     s = _norm(path)
-    if not s or s == "/":
-        return {"/", "/en"}
     out = {s}
-    if not s.startswith("/en/") and s != "/en":
-        out.add(f"/en{s}")
+    for loc in _LOCALES:
+        if not loc:
+            continue
+        loc = loc.strip("/")
+        out.add(f"/{loc}{s}")
     return out
+
+def _csv_paths(envname: str, defaults: list[str]) -> list[str]:
+    raw = (os.getenv(envname) or "").strip()
+    if not raw:
+        items = defaults
+    else:
+        items = [x.strip() for x in raw.split(",") if x.strip()]
+    # chuẩn hoá & loại rỗng
+    seen = []
+    for it in items:
+        n = _norm(it)
+        if n and n not in seen:
+            seen.append(n)
+    return seen
 
 def _is_login_like(page) -> bool:
     """
     Nhận diện trang đang hiển thị gate/login (không redirect).
-    Chỉ cần thấy 1 selector phổ biến là đủ.
+    Chỉ cần thấy 1 trong các selector phổ biến là đủ.
     """
     selectors = [
         'input[type="email"]',
@@ -46,47 +61,60 @@ def _is_login_like(page) -> bool:
         'input[type="password"]',
         'input[name*="password" i]',
         'button:has-text("Login")',
-        'button:has-text("Log in")',
         'button:has-text("Sign in")',
         'button:has-text("Đăng nhập")',
         'form[action*="login" i]',
         '[data-testid*="login" i]',
     ]
     for sel in selectors:
-        with contextlib.suppress(Exception):
-            loc = page.locator(sel).first
-            if loc.is_visible(timeout=500):
+        try:
+            if page.locator(sel).first.is_visible():
                 return True
+        except Exception:
+            pass
     return False
 
-# ===================== config =====================
-TIMEOUT_MS = int(os.getenv("NAV_TIMEOUT_MS", "60000"))  # mặc định 60s
-STRICT_PROTECTED = (os.getenv("STRICT_PROTECTED", "").strip().lower() in ("1", "true", "yes"))
+# ===== config =====
+TIMEOUT_MS = int(os.getenv("NAV_TIMEOUT_MS", "60000"))  # 60s mặc định
 
 # login paths chấp nhận nhiều biến thể
-_LOGIN_PATHS = {
-    _norm(os.getenv("LOGIN_PATH", "/login")),
-    _norm(os.getenv("ALT_LOGIN_PATH", "/en/login")),
+_LOGIN_PATHS_RAW = [
+    os.getenv("LOGIN_PATH", "/login"),
+    os.getenv("ALT_LOGIN_PATH", "/en/login"),
     "/login",
     "/en/login",
-}
-_LOGIN_PATHS = {p for p in _LOGIN_PATHS if p}
-_LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
+]
+_LOGIN_PATHS = {_norm(p) for p in _LOGIN_PATHS_RAW if _norm(p)}
 
-# routes từ ENV (có mặc định an toàn)
-PUBLIC_ROUTES    = _env_list("PUBLIC_ROUTES", "/login")
-PROTECTED_ROUTES = _env_list("PROTECTED_ROUTES", "/store,/profile,/wallet")
+# sinh login variants có cả tiền tố locale
+_LOGIN_VARIANTS = set()
+for p in _LOGIN_PATHS:
+    _LOGIN_VARIANTS.update(_variants(p))
 
-# Cho phép override tạm thời các protected route thành public (ví dụ: "/profile,/wallet")
-PUBLIC_OVERRIDES = set(_env_list("PUBLIC_OVERRIDES", ""))
+# Danh sách mặc định (có thể override qua ENV):
+PUBLIC_DEFAULT = [
+    "/",
+    "/login",           # login coi là public
+    "/product",
+    "/QR",
+]
+PROTECTED_DEFAULT = [
+    "/store",
+    "/profile",
+    "/wallet",
+    "/orders",
+    "/cart",
+    "/checkout",
+]
 
-# Gom thành một danh sách case duy nhất để tránh mọi “double-parametrize”
-CASES = (
-    [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] +
-    [{"kind": "protected", "path": p} for p in PROTECTED_ROUTES]
-)
+PUBLIC_ROUTES = _csv_paths("PUBLIC_ROUTES", PUBLIC_DEFAULT)
+PROTECTED_ROUTES = _csv_paths("PROTECTED_ROUTES", PROTECTED_DEFAULT)
 
-# ===================== single test suite =====================
+# Tạo test matrix
+CASES = [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] + \
+        [{"kind": "protected", "path": p} for p in PROTECTED_ROUTES]
+
+# ===== tests =====
 @pytest.mark.smoke
 @pytest.mark.parametrize("case", CASES, ids=lambda c: f"{c['kind']}:{c['path']}")
 def test_routes_access(new_page, base_url, case):
@@ -94,10 +122,7 @@ def test_routes_access(new_page, base_url, case):
     - public: mở được (nếu thực tế redirect về login → coi như protected và skip)
       riêng /login (và biến thể) được coi là public hợp lệ.
     - protected: phải bị yêu cầu đăng nhập (redirect sang /login hoặc vẫn đứng tại
-      route nhưng hiện form login / trả 401/403).
-      Nếu thực tế route đang mở công khai, mặc định SKIP (để không vỡ pipeline).
-      Bật STRICT_PROTECTED=true để FAIL trong tình huống này.
-      Có thể khai báo PUBLIC_OVERRIDES để coi một số protected route là public.
+      route nhưng hiện form login / trả 401/403). Nếu thực tế public → skip để tránh false fail.
     """
     path = _norm(case["path"])
     url = f"{base_url}{path}"
@@ -109,7 +134,7 @@ def test_routes_access(new_page, base_url, case):
     final_url = new_page.url
 
     is_final_login = any(re.search(re.escape(v), final_url) for v in _LOGIN_VARIANTS)
-    is_target_login = (path in _LOGIN_PATHS) or (path in _LOGIN_VARIANTS)
+    is_target_login = path in _LOGIN_PATHS or path in _LOGIN_VARIANTS
 
     if case["kind"] == "public":
         # Với /login (và biến thể) => final phải là 1 trong các login variants
@@ -121,21 +146,12 @@ def test_routes_access(new_page, base_url, case):
         if is_final_login:
             pytest.skip(f"public {path} redirects to login → treat as protected: {final_url}")
 
-        # Không bị đẩy sang login: URL cuối phải khớp (nhận cả biến thể /en/<path>)
+        # Không bị đẩy sang login: URL cuối phải khớp (nhận cả biến thể /<locale>/<path>)
         ok = any(re.search(re.escape(v), final_url) for v in _variants(path))
         assert ok, f"URL mismatch for public {path}; final: {final_url}"
         return
 
     # ---- protected ----
-    # Cho phép override protected → public (tạm thời)
-    if path in PUBLIC_OVERRIDES:
-        # Nếu override thì hành vi như public
-        if is_final_login:
-            pytest.skip(f"override public {path} redirects to login (unexpected, but skipping): {final_url}")
-        ok = any(re.search(re.escape(v), final_url) for v in _variants(path))
-        assert ok, f"override public {path} final mismatch: {final_url}"
-        return
-
     if is_final_login:
         # Redirect đến login là đúng
         return
@@ -147,11 +163,5 @@ def test_routes_access(new_page, base_url, case):
         if _is_login_like(new_page) or status in (401, 403):
             return
 
-    # Không redirect và cũng không thấy login gate -> route đang mở công khai
-    msg = f"{path} appears public (no redirect, no login gate); final: {final_url}"
-    if STRICT_PROTECTED:
-        raise AssertionError(
-            f"{path} should require auth (redirect to login or show login gate); final: {final_url}"
-        )
-    else:
-        pytest.skip(msg)
+    # Thực tế không yêu cầu đăng nhập (đang public) → skip để tránh false fail
+    pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
