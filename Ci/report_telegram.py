@@ -1,150 +1,175 @@
-name: E2E
+# Ci/report_telegram.py
+from __future__ import annotations
+import os, sys, json, re
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
-on:
-  schedule:
-    # 4 giờ/lần, chạy 3 lần/ngày: 00:00, 08:00, 16:00 UTC
-    - cron: "0 0,8,16 * * *"
-  workflow_dispatch: {}
+import requests  # đã được pip install trong workflow
 
-concurrency:
-  group: e2e
-  cancel-in-progress: false
+# ===== Env =====
+JUNIT = os.getenv("JUNIT_XML") or "report/junit.xml"
+SERVER = os.getenv("GITHUB_SERVER_URL", "https://github.com")
+REPO   = os.getenv("GITHUB_REPOSITORY", "")
+RUN_ID = os.getenv("GITHUB_RUN_ID", "")
+REPORT_URL = f"{SERVER}/{REPO}/actions/runs/{RUN_ID}" if REPO and RUN_ID else ""
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      SITE: ratemate
-      ENV: prod
-      BASE_URL_PROD: https://store.ratemate.top
-      LOGIN_PATH: /en/login
-      REGISTER_PATH: /en/login
-      JUNIT_XML: /app/report/junit.xml
-      # Có thể mở rộng số case qua ENV:
-      # PUBLIC_ROUTES: "/,/login,/product,/QR,/about,/en/about"
-      # PROTECTED_ROUTES: "/store,/profile,/wallet,/orders,/cart,/checkout,/wishlist,/addresses"
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TG_CHAT  = os.getenv("TELEGRAM_CHAT_ID")
+MAX_TG_LEN = 4000  # < 4096 để an toàn
 
-    steps:
-      - uses: actions/checkout@v4
+# ===== Helpers =====
+def _short(txt: str, lim: int = 220) -> str:
+    if not txt:
+        return ""
+    first = None
+    for line in txt.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        first = s
+        if "AssertionError" in s or s.startswith("E "):
+            break
+    s = (first or "").strip()
+    s = re.sub(r"\s+", " ", s)
+    return s[:lim]
 
-      - name: Build test image
-        run: docker build -t ratemate-tests .
+def parse_junit(path: str):
+    """Đọc JUnit XML. Không có file -> trả về 0 để job không fail."""
+    p = Path(path)
+    if not p.exists():
+        return {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0}, [], [], []
 
-      - name: Run tests (Chromium)
-        run: |
-          docker rm -f ratemate_e2e 2>/dev/null || true
-          docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
-            -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
-            -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
-            ratemate-tests \
-            bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
-              pytest -vv tests/auth tests/smoke/test_routes.py \
-                --browser=chromium \
-                -p no:pytest_excel \
-                -o cache_dir=/tmp/pytest_cache \
-                --output=/tmp/test-results \
-                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-                -o junit_family=xunit2 --junitxml=$JUNIT_XML \
-                --html=/app/report/e2e.html --self-contained-html || true"
+    root = ET.parse(p).getroot()
+    suites = [root] if root.tag.endswith("testsuite") else root.findall(".//testsuite")
 
-      - name: Copy report out
-        run: |
-          mkdir -p report
-          docker cp ratemate_e2e:/app/report ./report || true
-          docker rm -f ratemate_e2e 2>/dev/null || true
-          ls -la report || true
+    summary = dict(tests=0, failures=0, errors=0, skipped=0, time=0.0)
+    fails, errs, passes = [], [], []
 
-      - name: Parse JUnit → summary
-        id: sum
-        run: |
-          python - <<'PY'
-          import os, json, pathlib, xml.etree.ElementTree as ET
-          out = {}
-          p = pathlib.Path("report/junit.xml")
-          if p.exists():
-              t = ET.parse(p).getroot()
-              ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-              def g(a): return int(ts.get(a, "0"))
-              out = {
-                  "total": g("tests"),
-                  "fail": g("failures"),
-                  "error": g("errors"),
-                  "skip": g("skipped"),
-                  "duration": float(ts.get("time","0")),
-                  "fails": [],
-              }
-              for tc in ts.findall(".//testcase"):
-                  fe = tc.find("failure") or tc.find("error")
-                  if fe is not None:
-                      name = f"{tc.get('classname','')}.{tc.get('name')}"
-                      msg  = (fe.get("message") or "").strip()
-                      txt  = (fe.text or "").strip()
-                      out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write("summary_json<<EOF\n")
-              fh.write(json.dumps(out, ensure_ascii=False))
-              fh.write("\nEOF\n")
-          PY
+    for s in suites:
+        summary["tests"]    += int(s.attrib.get("tests", 0))
+        summary["failures"] += int(s.attrib.get("failures", 0))
+        summary["errors"]   += int(s.attrib.get("errors", 0))
+        summary["skipped"]  += int(s.attrib.get("skipped", 0))
+        try:
+            summary["time"] += float(s.attrib.get("time", 0.0))
+        except Exception:
+            pass
 
-      # Gửi Telegram bằng Python (requests) – tránh lỗi curl/proxy
-      - name: Setup Python for notification
-        if: always()
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        for tc in s.findall("testcase"):
+            name = tc.attrib.get("name", "")
+            cls  = tc.attrib.get("classname", "")
+            full = f"{cls}::{name}" if cls else name
+            fail = tc.find("failure")
+            err  = tc.find("error")
+            skp  = tc.find("skipped")
+            if fail is not None:
+                msg = fail.attrib.get("message") or (fail.text or "")
+                fails.append({"name": full, "why": _short(msg)})
+            elif err is not None:
+                msg = err.attrib.get("message") or (err.text or "")
+                errs.append({"name": full, "why": _short(msg)})
+            elif skp is not None:
+                pass
+            else:
+                passes.append(full)
 
-      - name: Install notify deps
-        if: always()
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+    return summary, fails, errs, passes
 
-      - name: Send Telegram (message via Python)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
-          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
-          JUNIT_XML:          report/junit.xml
-        run: |
-          python ci/report_telegram.py
+def format_message(summary, fails, errs, passes, report_url=""):
+    ok = (summary["failures"] == 0 and summary["errors"] == 0)
+    emoji = "✅" if ok else "❌"
+    passed_count = summary['tests'] - summary['failures'] - summary['errors'] - summary['skipped']
 
-      - name: Send Telegram (attach HTML report via Python)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
-        run: |
-          python - <<'PY'
-          import os, requests, os.path
-          px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-          if px and not (px.startswith("http") or px.startswith("socks")):
-              px = "http://" + px
-          proxies = {"http": px, "https": px} if px else None
+    lines = []
+    lines.append(
+        f"{emoji} E2E Result: {summary['tests']} tests | "
+        f"pass={passed_count} fail={summary['failures']} error={summary['errors']} skip={summary['skipped']}"
+    )
+    lines.append(f"Duration: ~{summary['time']:.1f}s")
+    if report_url:
+        lines.append(f"Run: {report_url}")
 
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat  = os.environ["TELEGRAM_CHAT_ID"]
-          path  = "report/e2e.html"
-          if not os.path.isfile(path):
-              print("No HTML report to attach.")
-              raise SystemExit(0)
+    if errs:
+        lines.append("\n== Errors (lỗi hệ thống) ==")
+        for e in errs[:20]:
+            lines.append(f"• {e['name']}")
+            if e['why']:
+                lines.append(f"  ↳ {e['why']}")
 
-          with open(path, "rb") as f:
-              files = {"document": ("e2e.html", f, "text/html")}
-              data  = {"chat_id": chat, "caption": "E2E report"}
-              r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
-                                data=data, files=files, timeout=60, proxies=proxies)
-              r.raise_for_status()
-              print("Telegram document sent.")
-          PY
+    if fails:
+        lines.append("\n== Failures (sai kỳ vọng) ==")
+        for f in fails[:20]:
+            lines.append(f"• {f['name']}")
+            if f['why']:
+                lines.append(f"  ↳ {f['why']}")
 
-      - name: Upload HTML report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-report
-          path: report/
-     
+    lines.append(f"\nPassed: {passed_count} case(s)")
+    return "\n".join(lines)
+
+def _proxies():
+    """
+    Ưu tiên TELEGRAM_PROXY; fallback HTTPS_PROXY/HTTP_PROXY.
+    Cho phép 'http://host:port' hoặc 'host:port' -> tự prepend http://
+    """
+    px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+    if not px:
+        return None
+    if not (px.startswith("http://") or px.startswith("https://") or px.startswith("socks")):
+        px = "http://" + px
+    return {"http": px, "https": px}
+
+def _send_chunked(text: str):
+    """Chia nhỏ và gửi nhiều tin nếu > 4096 ký tự."""
+    if not TG_TOKEN or not TG_CHAT:
+        print("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not provided; skip sending.")
+        print(text)
+        return
+
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    proxies = _proxies()
+
+    parts, cur, size = [], [], 0
+    for line in text.splitlines():
+        if size + len(line) + 1 > MAX_TG_LEN and cur:
+            parts.append("\n".join(cur))
+            cur, size = [], 0
+        cur.append(line)
+        size += len(line) + 1
+    if cur:
+        parts.append("\n".join(cur))
+
+    for i, chunk in enumerate(parts, 1):
+        payload = {"chat_id": TG_CHAT, "text": chunk, "disable_web_page_preview": True}
+        r = requests.post(url, json=payload, timeout=30, proxies=proxies)
+        r.raise_for_status()
+    print(f"Telegram sent OK ({len(parts)} message{'s' if len(parts) > 1 else ''}).")
+
+def main():
+    junit_path = sys.argv[1] if len(sys.argv) > 1 else JUNIT
+
+    # Ưu tiên SUMMARY_JSON nếu có
+    summary_json = os.getenv("SUMMARY_JSON")
+    if summary_json:
+        try:
+            obj = json.loads(summary_json) if isinstance(summary_json, str) else summary_json
+            summary = {
+                "tests": int(obj.get("total", 0)),
+                "failures": int(obj.get("fail", 0)),
+                "errors": int(obj.get("error", 0)),
+                "skipped": int(obj.get("skip", 0)),
+                "time": float(obj.get("duration", 0.0)),
+            }
+            fails = [{"name": f.get("name", ""), "why": _short(f.get("reason", ""))} for f in obj.get("fails", [])]
+            errs, passes = [], []
+        except Exception:
+            summary, fails, errs, passes = parse_junit(junit_path)
+    else:
+        summary, fails, errs, passes = parse_junit(junit_path)
+
+    msg = format_message(summary, fails, errs, passes, REPORT_URL)
+    print("\n===== Telegram message preview =====\n")
+    print(msg, "\n")
+    _send_chunked(msg)
+
+if __name__ == "__main__":
+    main()
