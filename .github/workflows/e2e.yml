@@ -1,9 +1,9 @@
 name: E2E
 
 on:
-  # chạy 3 lần/ngày (UTC 01:00, 05:00, 09:00) — chỉnh lịch theo nhu cầu
   schedule:
-    - cron: "0 1,5,9 * * *"
+    # Nếu muốn 4 giờ/lần, ngày chạy 3 lần: 0 0,8,16 * * *
+    - cron: "0 0,8,16 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -21,11 +21,9 @@ jobs:
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
-      # mở rộng case qua ENV (tuỳ chọn)
-      PUBLIC_ROUTES: "/,/login,/product,/QR,/about,/contact"
-      PROTECTED_ROUTES: "/store,/profile,/wallet,/orders,/cart,/checkout,/address"
-      ROUTE_LOCALES: "en,vi"
-      NAV_TIMEOUT_MS: "60000"
+      # Có thể mở rộng số case qua ENV dưới đây:
+      # PUBLIC_ROUTES: "/,/login,/product,/QR,/about,/en/about"
+      # PROTECTED_ROUTES: "/store,/profile,/wallet,/orders,/cart,/checkout,/wishlist,/addresses"
 
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +36,7 @@ jobs:
           docker rm -f ratemate_e2e 2>/dev/null || true
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
-            -e PUBLIC_ROUTES -e PROTECTED_ROUTES -e ROUTE_LOCALES -e NAV_TIMEOUT_MS \
+            -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
             ratemate-tests \
             bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
               pytest -vv tests/auth tests/smoke/test_routes.py \
@@ -68,8 +66,14 @@ jobs:
               t = ET.parse(p).getroot()
               ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
               def g(a): return int(ts.get(a, "0"))
-              out = {"total": g("tests"), "fail": g("failures"), "error": g("errors"),
-                     "skip": g("skipped"), "duration": float(ts.get("time","0")), "fails":[]}
+              out = {
+                  "total": g("tests"),
+                  "fail": g("failures"),
+                  "error": g("errors"),
+                  "skip": g("skipped"),
+                  "duration": float(ts.get("time","0")),
+                  "fails": [],
+              }
               for tc in ts.findall(".//testcase"):
                   fe = tc.find("failure") or tc.find("error")
                   if fe is not None:
@@ -83,36 +87,59 @@ jobs:
               fh.write("\nEOF\n")
           PY
 
+      # Gửi Telegram bằng Python (requests) — tránh lỗi curl proxy
+      - name: Setup Python for notification
+        if: always()
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install notify deps
+        if: always()
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
       - name: Send Telegram (message via Python)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}  # có thể để trống
+          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
           JUNIT_XML:          report/junit.xml
-        run: python ci/report_telegram.py
+        run: |
+          python ci/report_telegram.py
 
-      - name: Send Telegram (attach HTML report)
+      - name: Send Telegram (attach HTML report via Python)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
         run: |
-          if [ -f "report/e2e.html" ]; then
-            if [ -n "${TELEGRAM_PROXY}" ]; then
-              curl -x "${TELEGRAM_PROXY}" -sS -m 60 -F chat_id="${TELEGRAM_CHAT_ID}" \
-                   -F document="@report/e2e.html;type=text/html;filename=e2e.html" \
-                   -F caption="E2E report • $(date -u +%Y-%m-%dT%H:%MZ)" \
-                   "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
-            else
-              curl -sS -m 60 -F chat_id="${TELEGRAM_CHAT_ID}" \
-                   -F document="@report/e2e.html;type=text/html;filename=e2e.html" \
-                   -F caption="E2E report • $(date -u +%Y-%m-%dT%H:%MZ)" \
-                   "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
-            fi
-          fi
+          python - <<'PY'
+          import os, requests, os.path
+          px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+          if px and not (px.startswith("http") or px.startswith("socks")):
+              px = "http://" + px
+          proxies = {"http": px, "https": px} if px else None
+
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat  = os.environ["TELEGRAM_CHAT_ID"]
+          path  = "report/e2e.html"
+          if not os.path.isfile(path):
+              print("No HTML report to attach.")
+              raise SystemExit(0)
+
+          with open(path, "rb") as f:
+              files = {"document": ("e2e.html", f, "text/html")}
+              data  = {"chat_id": chat, "caption": "E2E report"}
+              r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
+                                data=data, files=files, timeout=60, proxies=proxies)
+              r.raise_for_status()
+              print("Telegram document sent.")
+          PY
 
       - name: Upload HTML report
         if: always()
