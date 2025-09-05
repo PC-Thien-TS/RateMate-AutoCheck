@@ -39,8 +39,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build test image
-        run: docker build -t ratemate-tests .
+      # --- MỚI: hiển thị Dockerfile để chắc chắn runner dùng đúng file ---
+      - name: Show Dockerfile used
+        run: |
+          echo "===== Dockerfile content ====="
+          sed -n '1,200p' Dockerfile || true
+
+      # --- MỚI: build không cache, chỉ định -f Dockerfile rõ ràng ---
+      - name: Build test image (no cache)
+        run: docker build --no-cache -t ratemate-tests -f Dockerfile .
 
       - name: Run tests (Chromium)
         run: |
@@ -69,7 +76,9 @@ jobs:
                 --html=/app/report/e2e.html --self-contained-html || true
             '
 
+      # --- Đổi: luôn copy report kể cả khi test step fail ---
       - name: Copy report out (đúng đường dẫn)
+        if: always()
         run: |
           mkdir -p report
           # Chép từng file để KHÔNG tạo thư mục lồng "report/report"
@@ -128,15 +137,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
+      # --- MỚI: bơm SUMMARY_JSON dự phòng từ junit.xml nếu output rỗng ---
       - name: Send Telegram (message via Python)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
-          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
           JUNIT_XML:          report/junit.xml
         run: |
+          export SUMMARY_JSON="${{ steps.sum.outputs.summary_json }}"
+          if [ -z "$SUMMARY_JSON" ] && [ -f "$JUNIT_XML" ]; then
+            echo "[INFO] SUMMARY_JSON empty → rebuild from $JUNIT_XML"
+            SUMMARY_JSON="$(python - <<'PY'
+            import json, xml.etree.ElementTree as ET
+            try:
+                t = ET.parse("report/junit.xml").getroot()
+                ts = t if t.tag.endswith("testsuite") else t.find(".//testsuite")
+                if ts is not None:
+                    def g(a): return int(ts.get(a, "0"))
+                    out = {
+                        "total": g("tests"),
+                        "fail": g("failures"),
+                        "error": g("errors"),
+                        "skip": g("skipped"),
+                        "duration": float(ts.get("time","0") or 0),
+                        "fails": [],
+                    }
+                    for tc in ts.findall(".//testcase"):
+                        fe = tc.find("failure") or tc.find("error")
+                        if fe is not None:
+                            name = f"{tc.get('classname','')}.{tc.get('name')}"
+                            msg  = (fe.get("message") or "").strip()
+                            txt  = (fe.text or "").strip()
+                            out["fails"].append({"name": name, "reason": (msg or txt or "No message")[:400]})
+                    print(json.dumps(out, ensure_ascii=False))
+                else:
+                    print("")
+            except Exception:
+                print("")
+            PY
+            )"
+          fi
+          export SUMMARY_JSON
           python Ci/report_telegram.py
 
       - name: Send Telegram (attach HTML report)
