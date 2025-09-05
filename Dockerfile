@@ -1,4 +1,4 @@
-# Dockerfile — Image chạy đủ Chromium/Firefox/WebKit cho Playwright (không cần MCR)
+# Dockerfile (Option B) — Ubuntu 22.04, vá lỗi apt & playwright
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -7,17 +7,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    CI=1
+    CI=1 \
+    TZ=UTC
 
-# APT & toolchain cơ bản + system deps cho browsers
+# APT base + system deps cho browsers (có fallback & retry)
 RUN set -eux; \
     echo 'Acquire::Retries "5"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' >/etc/apt/apt.conf.d/80retry; \
     apt-get update; \
-    # Base tools trước (cài ca-certificates sớm để HTTPS ổn định)
     apt-get install -y --no-install-recommends \
       ca-certificates curl git bash dumb-init tzdata \
       python3 python3-pip python3-venv python-is-python3; \
-    # System deps cho Playwright browsers
     apt-get install -y --no-install-recommends \
       libasound2 \
       libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
@@ -25,34 +24,36 @@ RUN set -eux; \
       libglib2.0-0 libgtk-3-0 libnss3 libnspr4 \
       libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 \
       libxrandr2 libxkbcommon0 libxshmfence1 libxext6 libxfixes3 libxrender1 \
-      libxss1; \
+      libxss1 \
+      # font & rendering
+      libpangocairo-1.0-0 libpango-1.0-0 libcairo2 libfontconfig1 fonts-noto-color-emoji; \
     # fonts-liberation có mirror cũ -> fallback sang fonts-liberation2
     (apt-get install -y --no-install-recommends fonts-liberation) \
       || apt-get install -y --no-install-recommends fonts-liberation2; \
-    # libicu trên jammy là 70; fallback sang libicu-dev nếu thiếu binary exact
-    (apt-get install -y --no-install-recommends libicu70) \
-      || apt-get install -y --no-install-recommends libicu-dev; \
+    # libicu trên jammy đôi khi thiếu libicu70 -> dùng libicu-dev thay thế
+    apt-get install -y --no-install-recommends libicu-dev; \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Cài deps Python trước để tận dụng cache
+# Cài deps Python
 COPY requirements.txt /app/requirements.txt
-RUN python3 -m pip install --upgrade pip && pip install -r requirements.txt
+RUN python3 -m pip install --upgrade pip && \
+    # Quan trọng: KHÔNG pin playwright==1.47.2 (không còn). Dùng >=1.49
+    pip install --no-cache-dir -r requirements.txt "playwright>=1.49,<1.50"
 
-# Cài browsers ở build-time (đang quyền root)
-# Đã cài sẵn system deps nên KHÔNG cần --with-deps (tránh apt bên trong)
-RUN python3 -m playwright install chromium firefox webkit \
- && mkdir -p /ms-playwright && chmod -R a+rX /ms-playwright
+# Cài browsers (đã có system deps nên không cần --with-deps)
+RUN python3 -m playwright install chromium firefox webkit && \
+    mkdir -p /ms-playwright && chmod -R a+rX /ms-playwright
 
-# Tạo user thường (bảo mật hơn lúc runtime)
+# User thường
 ARG UID=10001
 ARG GID=10001
-RUN groupadd -g ${GID} app && useradd -m -u ${UID} -g ${GID} app \
- && mkdir -p /home/app/.cache /home/app/.config /tmp/xdg \
- && chown -R ${UID}:${GID} /home/app /tmp/xdg
-
+RUN groupadd -g ${GID} app && useradd -m -u ${UID} -g ${GID} app && \
+    mkdir -p /home/app/.cache /home/app/.config /tmp/xdg && \
+    chown -R ${UID}:${GID} /home/app /tmp/xdg
 USER ${UID}:${GID}
+
 ENV HOME=/home/app \
     XDG_CACHE_HOME=/home/app/.cache \
     XDG_CONFIG_HOME=/home/app/.config \
@@ -60,8 +61,5 @@ ENV HOME=/home/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# Copy mã nguồn (khi chạy CI có thể bind-mount/override)
 COPY --chown=${UID}:${GID} . /app
-
-ENTRYPOINT ["dumb-init","--"]
-CMD ["pytest","-vv","tests","--browser","chromium","--browser","firefox","--browser","webkit","--screenshot=only-on-failure","--video=off","--tracing=retain-on-failure"]
+RUN mkdir -p /app/report

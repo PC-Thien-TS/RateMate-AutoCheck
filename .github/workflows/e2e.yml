@@ -87,28 +87,32 @@ jobs:
           out = {}
           p = pathlib.Path("report/junit.xml")
           if p.exists():
-              t = ET.parse(p).getroot()
-              ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-              def g(a): return int(ts.get(a, "0"))
-              out = {
-                  "total": g("tests"),
-                  "fail": g("failures"),
-                  "error": g("errors"),
-                  "skip": g("skipped"),
-                  "duration": float(ts.get("time","0")),
-                  "fails": [],
-              }
-              for tc in ts.findall(".//testcase"):
-                  fe = tc.find("failure") or tc.find("error")
-                  if fe is not None:
-                      name = f"{tc.get('classname','')}.{tc.get('name')}"
-                      msg  = (fe.get("message") or "").strip()
-                      txt  = (fe.text or "").strip()
-                      out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
+              try:
+                  t = ET.parse(p).getroot()
+                  ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
+                  if ts is not None:
+                      def g(a): return int(ts.get(a, "0"))
+                      out = {
+                          "total": g("tests"),
+                          "fail": g("failures"),
+                          "error": g("errors"),
+                          "skip": g("skipped"),
+                          "duration": float(ts.get("time","0") or 0),
+                          "fails": [],
+                      }
+                      for tc in ts.findall(".//testcase"):
+                          fe = tc.find("failure") or tc.find("error")
+                          if fe is not None:
+                              name = f"{tc.get('classname','')}.{tc.get('name')}"
+                              msg  = (fe.get("message") or "").strip()
+                              txt  = (fe.text or "").strip()
+                              out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
+              except Exception:
+                  out = {}
+          # chỉ set output khi có dữ liệu hợp lệ; nếu rỗng => để biến output rỗng
+          val = json.dumps(out, ensure_ascii=False) if out else ""
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write("summary_json<<EOF\n")
-              fh.write(json.dumps(out, ensure_ascii=False))
-              fh.write("\nEOF\n")
+              fh.write(f"summary_json={val}\n")
           PY
 
       # Gửi Telegram bằng Python (requests)
