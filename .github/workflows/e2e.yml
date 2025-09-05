@@ -2,7 +2,6 @@ name: E2E
 
 on:
   schedule:
-    # 4 giờ/lần: 0 0,8,16 * * *
     - cron: "0 0,8,16 * * *"
   workflow_dispatch: {}
 
@@ -14,18 +13,28 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     env:
       SITE: ratemate
       ENV: prod
+      # Base URL chuẩn
       BASE_URL_PROD: https://store.ratemate.top
+      # Đường dẫn auth (nếu site thật khác thì đổi ở đây)
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
+      # JUnit bên trong container
       JUNIT_XML: /app/report/junit.xml
-      # Phân loại route để tránh SKIP:
-      # - /product, /QR hiện đang redirect login => PROTECTED
-      # - /profile, /wallet, /orders, /cart, /checkout hiện vào thẳng => PUBLIC
-      PUBLIC_ROUTES: "/,/login,/profile,/wallet,/orders,/cart,/checkout"
+
+      # PHÂN LOẠI ROUTE để tránh SKIP
+      PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
+
+      # Bắt conftest chỉ dùng ENV (bỏ qua YAML)
+      DISABLE_SITE_YAML: "1"
+
+      # Credentials cho test login (đặt secrets trong repo của bạn)
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -34,18 +43,22 @@ jobs:
         run: docker build -t ratemate-tests .
 
       - name: Run tests (Chromium)
-        env:
-          # Cấp cred để 2 test login không bị SKIP
-          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
-          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
+
+          # Chạy container, COPY toàn bộ ENV cần thiết vào trong
           docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
-            -e SITE -e ENV -e BASE_URL_PROD -e LOGIN_PATH -e REGISTER_PATH \
+            -e SITE -e ENV \
+            -e BASE_URL_PROD \
+            -e BASE_URL="$BASE_URL_PROD" \
+            -e LOGIN_PATH -e REGISTER_PATH \
             -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
             -e E2E_EMAIL -e E2E_PASSWORD \
+            -e DISABLE_SITE_YAML \
             ratemate-tests \
-            bash -lc "mkdir -p /tmp/pytest_cache /tmp/test-results /app/report && \
+            bash -lc 'set -e
+              echo "[DEBUG] BASE_URL=$BASE_URL BASE_URL_PROD=$BASE_URL_PROD"
+              mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
               pytest -vv tests/auth tests/smoke/test_routes.py \
                 --browser=chromium \
                 -p no:pytest_excel \
@@ -53,22 +66,21 @@ jobs:
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
                 -o junit_family=xunit2 --junitxml=$JUNIT_XML \
-                --html=/app/report/e2e.html --self-contained-html || true"
+                --html=/app/report/e2e.html --self-contained-html || true
+            '
 
-      - name: Copy report out
-        if: always()
+      - name: Copy report out (đúng đường dẫn)
         run: |
-          rm -rf report
           mkdir -p report
-          # Lưu ý: dấu '/.' để copy *nội dung* của /app/report
-          docker cp ratemate_e2e:/app/report/. ./report || true
+          # Chép từng file để KHÔNG tạo thư mục lồng "report/report"
+          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
+          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
           docker rm -f ratemate_e2e 2>/dev/null || true
-          echo "== tree report =="
-          find report -maxdepth 2 -type f -printf "%p\n" | sort || true
+          echo "== ls report =="
+          ls -la report || true
 
       - name: Parse JUnit → summary
         id: sum
-        if: always()
         run: |
           python - <<'PY'
           import os, json, pathlib, xml.etree.ElementTree as ET
@@ -99,7 +111,7 @@ jobs:
               fh.write("\nEOF\n")
           PY
 
-      # Python để gửi Telegram (case-sensitive path: 'Ci/')
+      # Gửi Telegram bằng Python (requests)
       - name: Setup Python for notification
         if: always()
         uses: actions/setup-python@v5
@@ -123,7 +135,7 @@ jobs:
         run: |
           python Ci/report_telegram.py
 
-      - name: Send Telegram (attach HTML report via Python)
+      - name: Send Telegram (attach HTML report)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -137,9 +149,9 @@ jobs:
               px = "http://" + px
           proxies = {"http": px, "https": px} if px else None
 
-          token = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat  = os.environ["TELEGRAM_CHAT_ID"]
-          path  = "report/e2e.html"
+          tok = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat = os.environ["TELEGRAM_CHAT_ID"]
+          path = "report/e2e.html"
           if not os.path.isfile(path):
               print("No HTML report to attach.")
               raise SystemExit(0)
@@ -147,15 +159,9 @@ jobs:
           with open(path, "rb") as f:
               files = {"document": ("e2e.html", f, "text/html")}
               data  = {"chat_id": chat, "caption": "E2E report"}
-              try:
-                  r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
-                                    data=data, files=files, timeout=60, proxies=proxies)
-                  r.raise_for_status()
-              except Exception as e:
-                  print("[telegram] proxy failed, retrying direct...", e)
-                  r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
-                                    data=data, files=files, timeout=60)
-                  r.raise_for_status()
+              r = requests.post(f"https://api.telegram.org/bot{tok}/sendDocument",
+                                data=data, files=files, timeout=60, proxies=proxies)
+              r.raise_for_status()
               print("Telegram document sent.")
           PY
 
