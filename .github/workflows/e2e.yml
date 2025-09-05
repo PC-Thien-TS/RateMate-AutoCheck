@@ -21,12 +21,19 @@ jobs:
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
+
+      # PHÂN LOẠI ROUTE để tránh SKIP
       PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
+
+      # Bắt conftest chỉ dùng ENV (bỏ qua YAML)
       DISABLE_SITE_YAML: "1"
+
+      # Credentials cho test login
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
-      # Tăng heap cho Node (Playwright driver)
+
+      # Tăng heap cho Node (driver Playwright)
       NODE_OPTIONS: --max-old-space-size=6144
 
     steps:
@@ -35,12 +42,12 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium, with keepalive & timeout)
+      - name: Run tests (Chromium, quiet keepalive)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
 
-          # Keepalive: in dấu chấm mỗi 2 phút để tránh GH cắt vì im lặng
+          # Keepalive im lặng: in dấu chấm mỗi 2 phút để tránh job bị cắt vì im lặng
           (
             while true; do
               printf '.'
@@ -58,20 +65,9 @@ jobs:
             -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
             -e E2E_EMAIL -e E2E_PASSWORD \
             -e DISABLE_SITE_YAML \
+            -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
             -e NODE_OPTIONS \
-            ratemate-tests \
-            bash -lc 'set -e
-              mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
-              pytest -vv -s tests/auth tests/smoke/test_routes.py \
-                --browser=chromium \
-                -p no:pytest_excel \
-                -o cache_dir=/tmp/pytest_cache \
-                --output=/tmp/test-results \
-                --screenshot=only-on-failure --video=off --tracing=off \
-                -o junit_family=xunit2 --junitxml=$JUNIT_XML \
-                --html=/app/report/e2e.html --self-contained-html \
-                -o log_cli=true -o log_cli_level=INFO --durations=10 || true
-            '
+            ratemate-tests || true
           RC=$?
 
           kill $KPID 2>/dev/null || true
@@ -83,14 +79,13 @@ jobs:
 
           exit 0
 
-      - name: Copy report out (đúng đường dẫn)
+      - name: Copy report out
         if: always()
         run: |
           mkdir -p report
-          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
-          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
+          docker cp ratemate_e2e:/app/report/junit.xml report/junit.xml  || true
+          docker cp ratemate_e2e:/app/report/e2e.html  report/e2e.html   || true
           docker rm -f ratemate_e2e 2>/dev/null || true
-          echo "== ls report =="
           ls -la report || true
 
       - name: Parse JUnit → summary
@@ -141,7 +136,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Send Telegram (message via Python)
+      - name: Send Telegram (message)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
