@@ -69,16 +69,31 @@ def _cfg_ratemate_env_only():
     return base_url, auth_paths, credentials, locales, routes
 
 def _active_site_cfg():
+    """
+    Trả về tuple: (site, base_url, auth_paths, credentials, locales, routes)
+    - Nếu DISABLE_SITE_YAML=1 -> bỏ qua YAML, chỉ dùng ENV.
+    - Mặc định: YAML-first; nếu không có YAML -> ENV-only.
+    """
     site = _site_name()
+    if os.getenv("DISABLE_SITE_YAML") == "1":
+        base_url, auth_paths, credentials, locales, routes = _cfg_ratemate_env_only()
+        return site, base_url, auth_paths, credentials, locales, routes
+
     y = _load_yaml_for_site(site)
     if y:
         base_url, auth_paths, credentials, locales, routes = _cfg_from_yaml(y)
         return site, base_url, auth_paths, credentials, locales, routes
+
     base_url, auth_paths, credentials, locales, routes = _cfg_ratemate_env_only()
     return site, base_url, auth_paths, credentials, locales, routes
 
 def pytest_configure(config):
     site, base_url, *_ = _active_site_cfg()
+    if not base_url:
+        pytest.exit(
+            "BASE_URL rỗng. Hãy truyền BASE_URL hoặc BASE_URL_PROD/BASE_URL_STAGING "
+            "và/hoặc đặt DISABLE_SITE_YAML=1 để dùng ENV.", returncode=2
+        )
     md = getattr(config, "_metadata", None)
     if md is not None:
         md["SITE"] = site
