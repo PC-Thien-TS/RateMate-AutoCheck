@@ -8,7 +8,7 @@ pytest-base-url==2.1.0
 
 # Playwright
 pytest-playwright==0.5.0
-playwright==1.47.*   # <-- fix: cho phép mọi patch của 1.47 (vd 1.47.0)
+playwright==1.47.0  # <-- fix: cho phép mọi patch của 1.47 (vd 1.47.0)
 
 # Optional plugin (đang disable trong CI bằng -p no:pytest_excel)
 pytest-excel==1.7.0
