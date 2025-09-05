@@ -1,15 +1,15 @@
-# conftest.py — chỉ Python, KHÔNG dán nội dung YAML của workflow vào đây!
+# conftest.py — chỉ Python fixtures cho pytest/playwright
 
 import os
 import pytest
 
-# Một số test có thể đọc env trực tiếp; set default để ổn định
+# Set mặc định để tests ổn định nếu env chưa khai báo
 os.environ.setdefault("PUBLIC_ROUTES", "/,/login")
 os.environ.setdefault("PROTECTED_ROUTES", "/store,/product,/QR")
 
 @pytest.fixture(scope="session")
 def base_url() -> str:
-    """Base URL cho site, ưu tiên BASE_URL, fallback BASE_URL_PROD."""
+    """Base URL cho site; ưu tiên BASE_URL, rồi BASE_URL_PROD, rồi default."""
     return os.getenv("BASE_URL") or os.getenv("BASE_URL_PROD") or "https://store.ratemate.top"
 
 @pytest.fixture(scope="session")
@@ -37,3 +37,19 @@ def credentials() -> dict:
         "email": os.getenv("E2E_EMAIL", ""),
         "password": os.getenv("E2E_PASSWORD", ""),
     }
+
+# === FIX CHÍNH: bổ sung fixture `new_page` mà tests đang gọi ===
+@pytest.fixture
+def new_page(context):
+    """
+    Tạo 1 Page mới từ BrowserContext của pytest-playwright.
+    Đảm bảo đóng sau khi test kết thúc.
+    """
+    page = context.new_page()
+    try:
+        yield page
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass
