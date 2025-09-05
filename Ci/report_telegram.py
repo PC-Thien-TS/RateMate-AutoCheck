@@ -2,6 +2,8 @@
 import os, re, sys, json
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 try:
     import requests
@@ -140,16 +142,64 @@ def _send_chunked(text: str):
     if cur:
         parts.append("\n".join(cur))
 
+    successful_parts = 0
+    
+    # Tạo session với retry strategy
+    session = requests.Session()
+    
+    # Thêm imports nếu chưa có (ở đầu file)
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=10)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
     for i, chunk in enumerate(parts, 1):
         payload = {"chat_id": TG_CHAT, "text": chunk, "disable_web_page_preview": True}
-        try:
-            r = requests.post(url, json=payload, timeout=30, proxies=proxies)
-            r.raise_for_status()
-        except Exception as e:
-            print("[telegram] proxy failed (ReadTimeout), retrying direct...")
-            r = requests.post(url, json=payload, timeout=30)
-            r.raise_for_status()
-    print(f"Telegram sent OK ({len(parts)} message{'s' if len(parts) > 1 else ''}).")
+        
+        # Thử nhiều phương án kết nối
+        attempts = [
+            {"proxies": proxies, "timeout": 45, "desc": "with proxy"},
+            {"proxies": None, "timeout": 60, "desc": "direct with longer timeout"},
+            {"proxies": None, "timeout": 90, "desc": "direct with very long timeout"}
+        ]
+        
+        for attempt in attempts:
+            try:
+                print(f"[telegram] Sending chunk {i}/{len(parts)} {attempt['desc']}...")
+                r = session.post(
+                    url, 
+                    json=payload, 
+                    timeout=attempt["timeout"],
+                    proxies=attempt["proxies"]
+                )
+                r.raise_for_status()
+                successful_parts += 1
+                print(f"[telegram] Chunk {i} sent successfully")
+                break
+            except requests.exceptions.Timeout:
+                print(f"[telegram] Timeout {attempt['desc']} for chunk {i}")
+                continue
+            except requests.exceptions.ProxyError:
+                print(f"[telegram] Proxy error for chunk {i}, trying direct...")
+                continue
+            except Exception as e:
+                print(f"[telegram] Error {attempt['desc']} for chunk {i}: {e}")
+                continue
+        else:
+            print(f"[telegram] All attempts failed for chunk {i}")
+    
+    if successful_parts > 0:
+        print(f"Telegram sent OK ({successful_parts}/{len(parts)} chunks).")
+    else:
+        print("Telegram sending failed completely.")
+        # Không raise exception để tránh fail cả process
 
 def main():
     junit_path = sys.argv[1] if len(sys.argv) > 1 else JUNIT
@@ -179,7 +229,12 @@ def main():
     msg = format_message(summary, fails, errs, passes, REPORT_URL)
     print("\n===== Telegram message preview =====\n")
     print(msg, "\n")
-    _send_chunked(msg)
+    try:
+        _send_chunked(msg)
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
+        print("Continuing without Telegram notification...")
+        # Không raise exception để process vẫn exit code 0 nếu test pass
 
 if __name__ == "__main__":
     main()
