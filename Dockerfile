@@ -1,4 +1,4 @@
-# Dockerfile — Image chạy đủ Chromium/Firefox/WebKit cho Playwright (không cần MCR)
+# Dockerfile — Image chạy đủ Chromium/Firefox/WebKit cho Playwright
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -9,14 +9,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# APT & toolchain cơ bản + system deps cho browsers
+# APT base + system deps cho browsers (có retry & fallback)
 RUN set -eux; \
     echo 'Acquire::Retries "5"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' >/etc/apt/apt.conf.d/80retry; \
     apt-get update; \
-    # Base tools trước (cài ca-certificates sớm để HTTPS ổn định)
+    # Base tools (KHÔNG cài dumb-init, KHÔNG cài python-is-python3)
     apt-get install -y --no-install-recommends \
-      ca-certificates curl git bash dumb-init tzdata \
-      python3 python3-pip python3-venv python-is-python3; \
+      ca-certificates curl git tzdata \
+      python3 python3-pip python3-venv; \
     # System deps cho Playwright browsers
     apt-get install -y --no-install-recommends \
       libasound2 \
@@ -25,13 +25,16 @@ RUN set -eux; \
       libglib2.0-0 libgtk-3-0 libnss3 libnspr4 \
       libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 \
       libxrandr2 libxkbcommon0 libxshmfence1 libxext6 libxfixes3 libxrender1 \
-      libxss1; \
+      libxss1 \
+      # font & rendering để webkit/firefox ổn định
+      libpangocairo-1.0-0 libpango-1.0-0 libcairo2 libfontconfig1 fonts-noto-color-emoji; \
     # fonts-liberation có mirror cũ -> fallback sang fonts-liberation2
     (apt-get install -y --no-install-recommends fonts-liberation) \
       || apt-get install -y --no-install-recommends fonts-liberation2; \
-    # libicu trên jammy là 70; fallback sang libicu-dev nếu thiếu binary exact
-    (apt-get install -y --no-install-recommends libicu70) \
-      || apt-get install -y --no-install-recommends libicu-dev; \
+    # libicu: dùng libicu-dev để tránh lệ thuộc phiên bản libicu70
+    apt-get install -y --no-install-recommends libicu-dev; \
+    # Tạo symlink 'python' -> 'python3' thay cho python-is-python3
+    ln -sf /usr/bin/python3 /usr/local/bin/python; \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -41,7 +44,7 @@ COPY requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade pip && pip install -r requirements.txt
 
 # Cài browsers ở build-time (đang quyền root)
-# Đã cài sẵn system deps nên KHÔNG cần --with-deps (tránh apt bên trong)
+# Đã cài sẵn system deps nên KHÔNG cần --with-deps
 RUN python3 -m playwright install chromium firefox webkit \
  && mkdir -p /ms-playwright && chmod -R a+rX /ms-playwright
 
@@ -60,8 +63,9 @@ ENV HOME=/home/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CI=1
 
-# Copy mã nguồn (khi chạy CI có thể bind-mount/override)
+# Copy mã nguồn (khi CI có thể bind-mount/override)
 COPY --chown=${UID}:${GID} . /app
 
-ENTRYPOINT ["dumb-init","--"]
-CMD ["pytest","-vv","tests","--browser","chromium","--browser","firefox","--browser","webkit","--screenshot=only-on-failure","--video=off","--tracing=retain-on-failure"]
+# Không dùng dumb-init nữa
+# Run mặc định: chỉ chromium (nhanh, ổn định trên CI). Muốn đủ 3 browser thì chỉnh thêm ở workflow.
+CMD ["pytest","-vv","tests","--browser=chromium","--screenshot=only-on-failure","--video=off","--tracing=retain-on-failure"]
