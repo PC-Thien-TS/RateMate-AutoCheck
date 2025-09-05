@@ -22,19 +22,12 @@ jobs:
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
 
-      # PHÂN LOẠI ROUTE để tránh SKIP
       PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
-
-      # Bắt conftest chỉ dùng ENV (bỏ qua YAML)
       DISABLE_SITE_YAML: "1"
 
-      # Credentials cho test login
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
-
-      # Tăng heap cho Node (driver Playwright)
-      NODE_OPTIONS: --max-old-space-size=6144
 
     steps:
       - uses: actions/checkout@v4
@@ -42,12 +35,10 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium, quiet keepalive)
+      - name: Run tests (Chromium, keepalive nhẹ)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
-
-          # Keepalive im lặng: in dấu chấm mỗi 2 phút để tránh job bị cắt vì im lặng
           (
             while true; do
               printf '.'
@@ -66,7 +57,6 @@ jobs:
             -e E2E_EMAIL -e E2E_PASSWORD \
             -e DISABLE_SITE_YAML \
             -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-            -e NODE_OPTIONS \
             ratemate-tests || true
           RC=$?
 
@@ -76,7 +66,6 @@ jobs:
           if [ "$RC" = "124" ]; then
             echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
           fi
-
           exit 0
 
       - name: Copy report out

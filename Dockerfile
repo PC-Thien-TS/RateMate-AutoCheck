@@ -1,32 +1,30 @@
-# Image chính chủ Playwright đã kèm browsers đúng version
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+# Playwright image đã kèm browsers, phiên bản ổn định (1.46.1)
+FROM mcr.microsoft.com/playwright/python:v1.46.1-jammy
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CI=1 \
-    # Tránh tải lại browsers và tăng heap cho Node (driver của Playwright)
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    NODE_OPTIONS=--max-old-space-size=6144
+    PWDEBUG=0
 
 WORKDIR /app
 
-# Cài deps Python
+# Cài deps Python (đã ghim version khớp image)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Tạo sẵn thư mục report/output
+# Thư mục báo cáo
 RUN mkdir -p /app/report /tmp/pytest_cache /tmp/test-results
 
-# Copy mã nguồn
+# Copy source
 COPY . /app
 
 # Chạy root để dễ docker cp báo cáo
 USER root
 
-# Mặc định chạy Chromium, tắt tracing để nhẹ bộ nhớ
 ENTRYPOINT ["bash","-lc"]
 CMD ["pytest -vv -s tests/auth tests/smoke/test_routes.py \
   --browser=chromium \
