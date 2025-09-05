@@ -1,204 +1,94 @@
-name: E2E
+# conftest.py
+import os
+import pytest
 
-on:
-  schedule:
-    - cron: "0 0,8,16 * * *"
-  workflow_dispatch: {}
 
-concurrency:
-  group: e2e
-  cancel-in-progress: false
+def _env(name: str, default: str = "") -> str:
+    return (os.getenv(name, default) or "").strip()
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
 
-    env:
-      SITE: ratemate
-      ENV: prod
-      # Base URL chuẩn
-      BASE_URL_PROD: https://store.ratemate.top
-      # Đường dẫn auth (nếu site thật khác thì đổi ở đây)
-      LOGIN_PATH: /en/login
-      REGISTER_PATH: /en/login
-      # JUnit bên trong container
-      JUNIT_XML: /app/report/junit.xml
+def _split_csv(s: str) -> list[str]:
+    return [x.strip() for x in (s or "").split(",") if x.strip()]
 
-      # PHÂN LOẠI ROUTE để tránh SKIP
-      PUBLIC_ROUTES: "/,/login"
-      PROTECTED_ROUTES: "/store,/product,/QR"
 
-      # Bắt conftest chỉ dùng ENV (bỏ qua YAML)
-      DISABLE_SITE_YAML: "1"
+# ---- Session-level fixtures (đọc từ ENV) ----
 
-      # Credentials cho test login (đặt secrets trong repo của bạn)
-      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
-      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+@pytest.fixture(scope="session")
+def site() -> str:
+    return _env("SITE", "ratemate")
 
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Build test image
-        run: docker build -t ratemate-tests .
+@pytest.fixture(scope="session")
+def base_url(pytestconfig) -> str:
+    # Ưu tiên ENV BASE_URL / BASE_URL_PROD; nếu trống thì thử --base-url của plugin base-url
+    env_base = _env("BASE_URL") or _env("BASE_URL_PROD")
+    try:
+        cli_base = pytestconfig.getoption("--base-url") or ""
+    except Exception:
+        cli_base = ""
+    return env_base or cli_base or ""
 
-      - name: Run tests (Chromium, with keepalive & timeout)
-        run: |
-          docker rm -f ratemate_e2e 2>/dev/null || true
-          set -e
 
-          # Keepalive: in log mỗi 30s để tránh GH cắt vì im lặng
-          (
-            while true; do
-              echo "[keepalive] $(date -u) still running..."
-              sleep 30
-            done
-          ) &
-          KPID=$!
+@pytest.fixture(scope="session")
+def auth_paths() -> dict:
+    return {
+        "login": _env("LOGIN_PATH", "/en/login"),
+        "register": _env("REGISTER_PATH", "/en/login"),
+    }
 
-          # Chạy tests, giới hạn 25 phút để còn thời gian copy/gửi báo cáo
-          set +e
-          timeout 25m docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
-            -e SITE -e ENV \
-            -e BASE_URL_PROD \
-            -e BASE_URL="$BASE_URL_PROD" \
-            -e LOGIN_PATH -e REGISTER_PATH \
-            -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
-            -e E2E_EMAIL -e E2E_PASSWORD \
-            -e DISABLE_SITE_YAML \
-            ratemate-tests \
-            bash -lc 'set -e
-              echo "[DEBUG] BASE_URL=$BASE_URL BASE_URL_PROD=$BASE_URL_PROD"
-              mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
-              # -s + log_cli để có log liên tục trong lúc playwright mở browser/đợi network
-              pytest -vv -s tests/auth tests/smoke/test_routes.py \
-                --browser=chromium \
-                -p no:pytest_excel \
-                -o cache_dir=/tmp/pytest_cache \
-                --output=/tmp/test-results \
-                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-                -o junit_family=xunit2 --junitxml=$JUNIT_XML \
-                --html=/app/report/e2e.html --self-contained-html \
-                -o log_cli=true -o log_cli_level=INFO --durations=10 || true
-            '
-          RC=$?
 
-          # Dừng keepalive
-          kill $KPID 2>/dev/null || true
-          wait $KPID 2>/dev/null || true
+@pytest.fixture(scope="session")
+def credentials() -> dict:
+    return {
+        "email": _env("E2E_EMAIL"),
+        "password": _env("E2E_PASSWORD"),
+    }
 
-          if [ "$RC" = "124" ]; then
-            echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
-          fi
 
-          # Không fail step ở đây để các bước copy/parse/telegram vẫn chạy
-          exit 0
+@pytest.fixture(scope="session")
+def public_routes() -> list[str]:
+    # Ví dụ: "/,/login"
+    return _split_csv(_env("PUBLIC_ROUTES", "/,/login"))
 
-      - name: Copy report out (đúng đường dẫn)
-        if: always()
-        run: |
-          mkdir -p report
-          # Chép từng file để KHÔNG tạo thư mục lồng "report/report"
-          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
-          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
-          docker rm -f ratemate_e2e 2>/dev/null || true
-          echo "== ls report =="
-          ls -la report || true
 
-      - name: Parse JUnit → summary
-        if: always()
-        id: sum
-        run: |
-          python - <<'PY'
-          import os, json, pathlib, xml.etree.ElementTree as ET
-          out = {}
-          p = pathlib.Path("report/junit.xml")
-          if p.exists():
-              try:
-                  t = ET.parse(p).getroot()
-                  ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
-                  if ts is not None:
-                      def g(a): return int(ts.get(a, "0"))
-                      out = {
-                          "total": g("tests"),
-                          "fail": g("failures"),
-                          "error": g("errors"),
-                          "skip": g("skipped"),
-                          "duration": float(ts.get("time","0") or 0),
-                          "fails": [],
-                      }
-                      for tc in ts.findall(".//testcase"):
-                          fe = tc.find("failure") or tc.find("error")
-                          if fe is not None:
-                              name = f"{tc.get('classname','')}.{tc.get('name')}"
-                              msg  = (fe.get("message") or "").strip()
-                              txt  = (fe.text or "").strip()
-                              out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
-              except Exception:
-                  out = {}
-          # chỉ set output khi có dữ liệu hợp lệ; nếu rỗng => để biến output rỗng
-          val = json.dumps(out, ensure_ascii=False) if out else ""
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write(f"summary_json={val}\n")
-          PY
+@pytest.fixture(scope="session")
+def protected_routes() -> list[str]:
+    # Ví dụ: "/store,/product,/QR"
+    return _split_csv(_env("PROTECTED_ROUTES", "/store,/product,/QR"))
 
-      # Gửi Telegram bằng Python (requests)
-      - name: Setup Python for notification
-        if: always()
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
 
-      - name: Install notify deps
-        if: always()
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+@pytest.fixture(scope="session")
+def locale() -> str:
+    # Dùng cho test i18n/link nếu cần
+    return _env("LOCALE", "en")
 
-      - name: Send Telegram (message via Python)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
-          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
-          JUNIT_XML:          report/junit.xml
-        run: |
-          python Ci/report_telegram.py
 
-      - name: Send Telegram (attach HTML report)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
-        run: |
-          python - <<'PY'
-          import os, requests, os.path
-          px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-          if px and not (px.startswith("http") or px.startswith("socks")):
-              px = "http://" + px
-          proxies = {"http": px, "https": px} if px else None
+# ---- Page-level fixture cho Playwright ----
+# pytest-playwright cung cấp sẵn 'context'; ta tạo 'new_page' giống test đang dùng.
 
-          tok = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat = os.environ["TELEGRAM_CHAT_ID"]
-          path = "report/e2e.html"
-          if not os.path.isfile(path):
-              print("No HTML report to attach.")
-              raise SystemExit(0)
+@pytest.fixture
+def new_page(context):
+    p = context.new_page()
+    # Set timeout mặc định (ms) nếu có ENV TIMEOUT_MS, mặc định 60000
+    try:
+        to = int(_env("TIMEOUT_MS", "60000"))
+        p.set_default_navigation_timeout(to)
+        p.set_default_timeout(to)
+    except Exception:
+        pass
+    yield p
+    try:
+        p.close()
+    except Exception:
+        pass
 
-          with open(path, "rb") as f:
-              files = {"document": ("e2e.html", f, "text/html")}
-              data  = {"chat_id": chat, "caption": "E2E report"}
-              r = requests.post(f"https://api.telegram.org/bot{tok}/sendDocument",
-                                data=data, files=files, timeout=60, proxies=proxies)
-              r.raise_for_status()
-              print("Telegram document sent.")
-          PY
 
-      - name: Upload HTML report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-report
-          path: report/
+def pytest_configure(config):
+    """Ghi Base URL vào metadata (nếu plugin pytest-metadata có mặt) để report dễ đọc."""
+    try:
+        base = _env("BASE_URL") or _env("BASE_URL_PROD")
+        md = getattr(config, "_metadata", None)
+        if isinstance(md, dict):
+            md["Base URL"] = base
+    except Exception:
+        pass
