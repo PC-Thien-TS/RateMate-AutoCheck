@@ -21,17 +21,13 @@ jobs:
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
-
-      # ROUTE để giảm skip/nhận diện đúng public/protected
       PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
-
-      # ép tests dùng ENV, bỏ YAML nếu có
       DISABLE_SITE_YAML: "1"
-
-      # credentials cho test đăng nhập
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      # Tăng heap cho Node (Playwright driver)
+      NODE_OPTIONS: --max-old-space-size=6144
 
     steps:
       - uses: actions/checkout@v4
@@ -39,23 +35,22 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium, keepalive & timeout)
+      - name: Run tests (Chromium, with keepalive & timeout)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
 
-          # Keepalive: in log mỗi 30s để GH không cắt do im lặng
+          # Keepalive: in dấu chấm mỗi 2 phút để tránh GH cắt vì im lặng
           (
             while true; do
-              echo "[keepalive] $(date -u) running..."
-              sleep 30
+              printf '.'
+              sleep 120
             done
-          ) & KPID=$!
+          ) &
+          KPID=$!
 
-          # Giới hạn 25 phút để kịp copy báo cáo
           set +e
           timeout 25m docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
-            -e PYTHONUNBUFFERED=1 \
             -e SITE -e ENV \
             -e BASE_URL_PROD \
             -e BASE_URL="$BASE_URL_PROD" \
@@ -63,6 +58,7 @@ jobs:
             -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
             -e E2E_EMAIL -e E2E_PASSWORD \
             -e DISABLE_SITE_YAML \
+            -e NODE_OPTIONS \
             ratemate-tests \
             bash -lc 'set -e
               mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
@@ -71,19 +67,20 @@ jobs:
                 -p no:pytest_excel \
                 -o cache_dir=/tmp/pytest_cache \
                 --output=/tmp/test-results \
-                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-                -o log_cli=true -o log_cli_level=INFO \
+                --screenshot=only-on-failure --video=off --tracing=off \
                 -o junit_family=xunit2 --junitxml=$JUNIT_XML \
-                --html=/app/report/e2e.html --self-contained-html || true
+                --html=/app/report/e2e.html --self-contained-html \
+                -o log_cli=true -o log_cli_level=INFO --durations=10 || true
             '
           RC=$?
 
-          # Dừng keepalive
           kill $KPID 2>/dev/null || true
           wait $KPID 2>/dev/null || true
 
-          # Không fail step để các bước sau vẫn chạy
-          [ "$RC" = "124" ] && echo "::warning::Tests hit timeout (25m);" || true
+          if [ "$RC" = "124" ]; then
+            echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
+          fi
+
           exit 0
 
       - name: Copy report out (đúng đường dẫn)
@@ -127,7 +124,6 @@ jobs:
                               out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
               except Exception:
                   out = {}
-          # nếu rỗng -> output rỗng (report_telegram sẽ tự fallback)
           val = json.dumps(out, ensure_ascii=False) if out else ""
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"summary_json={val}\n")
