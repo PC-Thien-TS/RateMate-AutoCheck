@@ -1,151 +1,204 @@
-# conftest.py
-import os
-import pathlib
-import pytest
-from dotenv import load_dotenv
+name: E2E
 
-try:
-    import yaml
-except Exception:
-    yaml = None
+on:
+  schedule:
+    - cron: "0 0,8,16 * * *"
+  workflow_dispatch: {}
 
-load_dotenv()
+concurrency:
+  group: e2e
+  cancel-in-progress: false
 
-def _split_csv(val, default="en"):
-    return [s.strip() for s in (val or default).split(",") if s.strip()]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-def _routes_from_env(key, fallback):
-    raw = os.getenv(key)
-    return [p.strip() for p in raw.split(",") if p.strip()] if raw else list(fallback)
+    env:
+      SITE: ratemate
+      ENV: prod
+      # Base URL chuẩn
+      BASE_URL_PROD: https://store.ratemate.top
+      # Đường dẫn auth (nếu site thật khác thì đổi ở đây)
+      LOGIN_PATH: /en/login
+      REGISTER_PATH: /en/login
+      # JUnit bên trong container
+      JUNIT_XML: /app/report/junit.xml
 
-def _site_name() -> str:
-    return (os.getenv("SITE") or "ratemate").strip()
+      # PHÂN LOẠI ROUTE để tránh SKIP
+      PUBLIC_ROUTES: "/,/login"
+      PROTECTED_ROUTES: "/store,/product,/QR"
 
-def _load_yaml_for_site(site: str):
-    cfg_dir = os.getenv("CONFIG_DIR") or "config/sites"
-    p = pathlib.Path(cfg_dir) / f"{site}.yml"
-    if p.exists() and yaml:
-        with p.open("r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
-        return data
-    return None
+      # Bắt conftest chỉ dùng ENV (bỏ qua YAML)
+      DISABLE_SITE_YAML: "1"
 
-def _cfg_from_yaml(data: dict):
-    base_url = (data.get("base_url") or "").rstrip("/")
-    assert base_url, f"Thiếu base_url trong YAML"
+      # Credentials cho test login (đặt secrets trong repo của bạn)
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
-    auth_paths = data.get("auth_paths") or {}
-    login_path = auth_paths.get("login") or "/login"
-    register_path = auth_paths.get("register") or "/register"
+    steps:
+      - uses: actions/checkout@v4
 
-    cred = data.get("credentials") or {}
-    email = cred.get("email") or os.getenv("E2E_EMAIL") or os.getenv("LOGIN_EMAIL", "")
-    password = cred.get("password") or os.getenv("E2E_PASSWORD") or os.getenv("LOGIN_PASSWORD", "")
+      - name: Build test image
+        run: docker build -t ratemate-tests .
 
-    locales = list(data.get("locales") or ["en"])
-    routes = list(data.get("routes") or [login_path])
+      - name: Run tests (Chromium, with keepalive & timeout)
+        run: |
+          docker rm -f ratemate_e2e 2>/dev/null || true
+          set -e
 
-    return base_url, {"login": login_path, "register": register_path}, {"email": email, "password": password}, locales, routes
+          # Keepalive: in log mỗi 30s để tránh GH cắt vì im lặng
+          (
+            while true; do
+              echo "[keepalive] $(date -u) still running..."
+              sleep 30
+            done
+          ) &
+          KPID=$!
 
-def _cfg_ratemate_env_only():
-    env = (os.getenv("ENV") or "prod").lower()
-    if env == "staging":
-        base_url = os.getenv("BASE_URL_STAGING")
-    else:
-        base_url = os.getenv("BASE_URL_PROD")
-    base_url = (base_url or os.getenv("BASE_URL") or "").rstrip("/")
-    assert base_url, "Thiếu BASE_URL_PROD/BASE_URL_STAGING hoặc BASE_URL"
+          # Chạy tests, giới hạn 25 phút để còn thời gian copy/gửi báo cáo
+          set +e
+          timeout 25m docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
+            -e SITE -e ENV \
+            -e BASE_URL_PROD \
+            -e BASE_URL="$BASE_URL_PROD" \
+            -e LOGIN_PATH -e REGISTER_PATH \
+            -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
+            -e E2E_EMAIL -e E2E_PASSWORD \
+            -e DISABLE_SITE_YAML \
+            ratemate-tests \
+            bash -lc 'set -e
+              echo "[DEBUG] BASE_URL=$BASE_URL BASE_URL_PROD=$BASE_URL_PROD"
+              mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
+              # -s + log_cli để có log liên tục trong lúc playwright mở browser/đợi network
+              pytest -vv -s tests/auth tests/smoke/test_routes.py \
+                --browser=chromium \
+                -p no:pytest_excel \
+                -o cache_dir=/tmp/pytest_cache \
+                --output=/tmp/test-results \
+                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+                -o junit_family=xunit2 --junitxml=$JUNIT_XML \
+                --html=/app/report/e2e.html --self-contained-html \
+                -o log_cli=true -o log_cli_level=INFO --durations=10 || true
+            '
+          RC=$?
 
-    auth_paths = {
-        "login": os.getenv("LOGIN_PATH", "/en/login"),
-        "register": os.getenv("REGISTER_PATH", "/en/register"),
-    }
-    credentials = {
-        "email": os.getenv("E2E_EMAIL") or os.getenv("LOGIN_EMAIL", ""),
-        "password": os.getenv("E2E_PASSWORD") or os.getenv("LOGIN_PASSWORD", ""),
-    }
-    locales = _split_csv(os.getenv("LOCALES"), "en")
-    routes = _routes_from_env("SMOKE_ROUTES", ["/en/login", "/en/store", "/en/product", "/en/QR"])
-    return base_url, auth_paths, credentials, locales, routes
+          # Dừng keepalive
+          kill $KPID 2>/dev/null || true
+          wait $KPID 2>/dev/null || true
 
-def _active_site_cfg():
-    """
-    Trả về tuple: (site, base_url, auth_paths, credentials, locales, routes)
-    - Nếu DISABLE_SITE_YAML=1 -> bỏ qua YAML, chỉ dùng ENV.
-    - Mặc định: YAML-first; nếu không có YAML -> ENV-only.
-    """
-    site = _site_name()
-    if os.getenv("DISABLE_SITE_YAML") == "1":
-        base_url, auth_paths, credentials, locales, routes = _cfg_ratemate_env_only()
-        return site, base_url, auth_paths, credentials, locales, routes
+          if [ "$RC" = "124" ]; then
+            echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
+          fi
 
-    y = _load_yaml_for_site(site)
-    if y:
-        base_url, auth_paths, credentials, locales, routes = _cfg_from_yaml(y)
-        return site, base_url, auth_paths, credentials, locales, routes
+          # Không fail step ở đây để các bước copy/parse/telegram vẫn chạy
+          exit 0
 
-    base_url, auth_paths, credentials, locales, routes = _cfg_ratemate_env_only()
-    return site, base_url, auth_paths, credentials, locales, routes
+      - name: Copy report out (đúng đường dẫn)
+        if: always()
+        run: |
+          mkdir -p report
+          # Chép từng file để KHÔNG tạo thư mục lồng "report/report"
+          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
+          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
+          docker rm -f ratemate_e2e 2>/dev/null || true
+          echo "== ls report =="
+          ls -la report || true
 
-def pytest_configure(config):
-    site, base_url, *_ = _active_site_cfg()
-    if not base_url:
-        pytest.exit(
-            "BASE_URL rỗng. Hãy truyền BASE_URL hoặc BASE_URL_PROD/BASE_URL_STAGING "
-            "và/hoặc đặt DISABLE_SITE_YAML=1 để dùng ENV.", returncode=2
-        )
-    md = getattr(config, "_metadata", None)
-    if md is not None:
-        md["SITE"] = site
-        md["ENV"] = os.getenv("ENV", "prod")
-        md["Base URL"] = base_url
+      - name: Parse JUnit → summary
+        if: always()
+        id: sum
+        run: |
+          python - <<'PY'
+          import os, json, pathlib, xml.etree.ElementTree as ET
+          out = {}
+          p = pathlib.Path("report/junit.xml")
+          if p.exists():
+              try:
+                  t = ET.parse(p).getroot()
+                  ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
+                  if ts is not None:
+                      def g(a): return int(ts.get(a, "0"))
+                      out = {
+                          "total": g("tests"),
+                          "fail": g("failures"),
+                          "error": g("errors"),
+                          "skip": g("skipped"),
+                          "duration": float(ts.get("time","0") or 0),
+                          "fails": [],
+                      }
+                      for tc in ts.findall(".//testcase"):
+                          fe = tc.find("failure") or tc.find("error")
+                          if fe is not None:
+                              name = f"{tc.get('classname','')}.{tc.get('name')}"
+                              msg  = (fe.get("message") or "").strip()
+                              txt  = (fe.text or "").strip()
+                              out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
+              except Exception:
+                  out = {}
+          # chỉ set output khi có dữ liệu hợp lệ; nếu rỗng => để biến output rỗng
+          val = json.dumps(out, ensure_ascii=False) if out else ""
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"summary_json={val}\n")
+          PY
 
-@pytest.fixture(scope="session")
-def site():
-    return _active_site_cfg()[0]
+      # Gửi Telegram bằng Python (requests)
+      - name: Setup Python for notification
+        if: always()
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-@pytest.fixture(scope="session")
-def base_url():
-    return _active_site_cfg()[1]
+      - name: Install notify deps
+        if: always()
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
-@pytest.fixture(scope="session")
-def auth_paths():
-    return _active_site_cfg()[2]
+      - name: Send Telegram (message via Python)
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
+          JUNIT_XML:          report/junit.xml
+        run: |
+          python Ci/report_telegram.py
 
-@pytest.fixture(scope="session")
-def credentials():
-    return _active_site_cfg()[3]
+      - name: Send Telegram (attach HTML report)
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+        run: |
+          python - <<'PY'
+          import os, requests, os.path
+          px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+          if px and not (px.startswith("http") or px.startswith("socks")):
+              px = "http://" + px
+          proxies = {"http": px, "https": px} if px else None
 
-@pytest.fixture(scope="session")
-def locales():
-    return _active_site_cfg()[4]
+          tok = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat = os.environ["TELEGRAM_CHAT_ID"]
+          path = "report/e2e.html"
+          if not os.path.isfile(path):
+              print("No HTML report to attach.")
+              raise SystemExit(0)
 
-@pytest.fixture(scope="session")
-def routes():
-    return _active_site_cfg()[5]
+          with open(path, "rb") as f:
+              files = {"document": ("e2e.html", f, "text/html")}
+              data  = {"chat_id": chat, "caption": "E2E report"}
+              r = requests.post(f"https://api.telegram.org/bot{tok}/sendDocument",
+                                data=data, files=files, timeout=60, proxies=proxies)
+              r.raise_for_status()
+              print("Telegram document sent.")
+          PY
 
-@pytest.fixture
-def new_page(page):
-    return page
-
-def _already_parametrized(metafunc, arg: str) -> bool:
-    # Nếu test đã có @pytest.mark.parametrize(..., include arg) thì không auto-param nữa
-    for m in metafunc.definition.iter_markers(name="parametrize"):
-        if not m.args:
-            continue
-        names = m.args[0]
-        if isinstance(names, str):
-            argnames = [n.strip() for n in names.split(",")]
-        else:
-            argnames = [str(n) for n in names]
-        if arg in argnames:
-            return True
-    return False
-
-def pytest_generate_tests(metafunc):
-    if "route" in metafunc.fixturenames and not _already_parametrized(metafunc, "route"):
-        _routes = _active_site_cfg()[5]
-        metafunc.parametrize("route", _routes, ids=_routes or ["<no-routes>"])
-    if "locale" in metafunc.fixturenames and not _already_parametrized(metafunc, "locale"):
-        _locales = _active_site_cfg()[4]
-        metafunc.parametrize("locale", _locales, ids=_locales or ["default"])
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: report/
