@@ -107,9 +107,7 @@ class RegisterPage:
 
     def _open_register_ui(self):
         with contextlib.suppress(Exception):
-            tab = self.page.get_by_role(
-                "tab", name=re.compile(r"(register|sign\s*up|đăng\s*ký)", re.I)
-            )
+            tab = self.page.get_by_role("tab", name=_REGISTER_TAB_PATTERN)
             if tab.count() > 0:
                 t = tab.first
                 t.wait_for(state="visible", timeout=800)
@@ -117,9 +115,7 @@ class RegisterPage:
                 self.page.wait_for_timeout(150)
 
         with contextlib.suppress(Exception):
-            btn = self.page.get_by_role(
-                "button", name=re.compile(r"(register|sign\s*up|create\s*account|đăng\s*ký)", re.I)
-            )
+            btn = self.page.get_by_role("button", name=_REGISTER_BTN_PATTERN)
             if btn.count() > 0:
                 b = btn.first
                 b.wait_for(state="visible", timeout=800)
@@ -130,20 +126,20 @@ class RegisterPage:
 
     def _fill_email(self, email: str):
         # ưu tiên email/username/phone
-        loc = _input_union(self.page, r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)")
+        loc = _input_union(self.page, _EMAIL_PATTERN.pattern)
         el = _pick_visible(loc, timeout_ms=5000)
         _fill_force(el, email)
 
     def _fill_full_name(self, name: str):
-        loc = _input_union(self.page, r"(full\s*name|name|họ|tên)")
+        loc = _input_union(self.page, _FULL_NAME_PATTERN.pattern)
         el = _pick_visible(loc, timeout_ms=4000)
         with contextlib.suppress(Exception):
             _fill_force(el, name)
 
     def _fill_password(self, pw: str):
         # gồm cả placeholder 'password' dù type không hẳn password
-        loc = self.page.get_by_label(re.compile(r"(password|mật\s*khẩu)", re.I)).or_(
-            self.page.get_by_placeholder(re.compile(r"(password|mật\s*khẩu)", re.I))
+        loc = self.page.get_by_label(_PASSWORD_PATTERN).or_(
+            self.page.get_by_placeholder(_PASSWORD_PATTERN)
         ).or_(
             self.page.locator(
                 "input[type='password'], "
@@ -156,16 +152,13 @@ class RegisterPage:
 
     def _fill_confirm(self, pw: str):
         # confirm/verify/retype
-        loc = _input_union(self.page, r"(confirm|nhập\s*lại|re-?type|verify|repeat|xác\s*nhận)")
+        loc = _input_union(self.page, _CONFIRM_PW_PATTERN.pattern)
         el = _pick_visible(loc, timeout_ms=4000)
         with contextlib.suppress(Exception):
             _fill_force(el, pw)
 
     def _click_submit(self):
-        cand = self.page.get_by_role(
-            "button",
-            name=re.compile(r"(sign\s*up|register|create\s*account|submit|đăng\s*ký|tạo\s*tài\s*khoản)", re.I),
-        ).or_(
+        cand = self.page.get_by_role("button", name=_SUBMIT_BTN_PATTERN).or_(
             self.page.locator("button[type='submit'], input[type='submit']")
         )
         btn = _pick_visible(cand, timeout_ms=5000)
@@ -177,14 +170,7 @@ class RegisterPage:
 
     def visible_error_text(self, timeout: int = 5000) -> str:
         end = time.time() + timeout / 1000.0
-        loc = self.page.locator(
-            "[role='alert'], [role='status'], "
-            ".ant-form-item-explain-error, .ant-message-error, .ant-message-notice .ant-message-custom-content, "
-            ".ant-notification-notice-message, .ant-notification-notice-description, "
-            ".MuiAlert-root, .Toastify__toast--error, "
-            ".error, .error-message, .text-danger, .invalid-feedback, "
-            ".el-message__content, .v-alert__content, .toast-message, .notification-message"
-        )
+        loc = self.page.locator(_ERROR_SELECTOR)
         while time.time() < end:
             with contextlib.suppress(Exception):
                 if loc.count() > 0:
@@ -216,13 +202,12 @@ class RegisterPage:
             self._fill_confirm(confirm_password or password)
 
         # chờ response POST/PUT/PATCH tới endpoint liên quan register
-        patt = re.compile(r"(signup|sign[-_]?up|register|users|auth)", re.I)
         status, url, body = None, self.page.url, ""
         with contextlib.suppress(Exception):
             with self.page.expect_response(
                 lambda r: r.request
                 and r.request.method in ("POST", "PUT", "PATCH")
-                and patt.search(r.url or ""),
+                and _REGISTER_API_PATTERN.search(r.url or ""),
                 timeout=wait_response_ms,
             ) as resp_ctx:
                 self._click_submit()

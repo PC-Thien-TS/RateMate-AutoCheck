@@ -62,6 +62,16 @@ def _class_contains_expr(s: str) -> str:
     return "contains(translate(@class,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'%s')" % s
 
 
+# -------------------- constants --------------------
+
+_EMAIL_INPUT_SELECTOR = (
+    "input[type='email'], "
+    "input[autocomplete*='username' i], "
+    "input[name*='email' i], input[id*='email' i], "
+    "input[name*='user' i], input[id*='user' i]"
+)
+_EMAIL_LABEL_PATTERN = re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại|tài\s*khoản)", re.I)
+
 # -------------------- Login Page --------------------
 
 class LoginPage:
@@ -151,12 +161,7 @@ class LoginPage:
         # 1) Form hiện tại (trước)
         for i in range(cnt):
             f = forms.nth(i)
-            cand = f.locator(
-                "input[type='email'], "
-                "input[autocomplete*='username' i], "
-                "input[name*='email' i], input[id*='email' i], "
-                "input[name*='user' i], input[id*='user' i]"
-            )
+            cand = f.locator(_EMAIL_INPUT_SELECTOR)
             el = _first_visible(cand, timeout_ms=3500)
             if el and not _is_inside_ion_searchbar(el):
                 return el
@@ -165,12 +170,7 @@ class LoginPage:
         self._switch_to_password_mode()
         for i in range(cnt):
             f = forms.nth(i)
-            cand = f.locator(
-                "input[type='email'], "
-                "input[autocomplete*='username' i], "
-                "input[name*='email' i], input[id*='email' i], "
-                "input[name*='user' i], input[id*='user' i]"
-            )
+            cand = f.locator(_EMAIL_INPUT_SELECTOR)
             el = _first_visible(cand, timeout_ms=2500)
             if el and not _is_inside_ion_searchbar(el):
                 return el
@@ -205,20 +205,16 @@ class LoginPage:
                         ph = (cand.get_attribute("placeholder") or "").strip()
                     with contextlib.suppress(Exception):
                         nm = (cand.get_attribute("name") or "") + " " + (cand.get_attribute("id") or "")
-                    if re.search(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại|tài\s*khoản)", ph + " " + nm, re.I):
+                    if _EMAIL_LABEL_PATTERN.search(ph + " " + nm):
                         return cand
                 except Exception:
                     continue
 
         # 4) Fallback: label/placeholder/role textbox
-        cand = self.page.get_by_label(
-            re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)", re.I)
+        cand = self.page.get_by_label(_EMAIL_LABEL_PATTERN).or_(
+            self.page.get_by_placeholder(_EMAIL_LABEL_PATTERN)
         ).or_(
-            self.page.get_by_placeholder(
-                re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)", re.I)
-            )
-        ).or_(
-            self.page.get_by_role("textbox", name=re.compile(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)", re.I))
+            self.page.get_by_role("textbox", name=_EMAIL_LABEL_PATTERN)
         )
         el = _first_visible(cand, timeout_ms=2000)
         if el and not _is_inside_ion_searchbar(el):
@@ -240,7 +236,7 @@ class LoginPage:
                     ph = (cand.get_attribute("placeholder") or "").strip()
                 with contextlib.suppress(Exception):
                     nm = (cand.get_attribute("name") or "") + " " + (cand.get_attribute("id") or "")
-                if re.search(r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại|tài\s*khoản)", ph + " " + nm, re.I):
+                if _EMAIL_LABEL_PATTERN.search(ph + " " + nm):
                     return cand
             except Exception:
                 continue

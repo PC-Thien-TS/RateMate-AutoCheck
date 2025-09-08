@@ -1,5 +1,5 @@
 # Dùng image Playwright đã kèm browsers tương thích (1.47.0)
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.55.0-jammy
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore \
@@ -14,8 +14,8 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --upgrade pip && \
     if [ -s requirements.txt ]; then \
-      # Lọc bỏ các dòng chứa playwright / pytest-playwright để không đè phiên bản có sẵn trong image
-      grep -viE '^\s*(playwright|pytest-playwright)\b' requirements.txt > /tmp/req.filtered || true; \
+      # Lọc bỏ dòng 'playwright' để không đè phiên bản có sẵn trong image, nhưng giữ lại 'pytest-playwright'
+      grep -viE '^\s*playwright\b' requirements.txt > /tmp/req.filtered || true; \
       # Nếu file lọc rỗng thì bỏ qua, ngược lại thì cài
       if [ -s /tmp/req.filtered ]; then pip install -r /tmp/req.filtered; fi; \
     fi
