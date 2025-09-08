@@ -10,6 +10,25 @@ from pages.common_helpers import ResponseLike, fill_force, is_inside_ion_searchb
 
 # ---------- helpers ----------
 
+_REGISTER_TAB_PATTERN = re.compile(r"(register|sign\s*up|create\s*account|đăng\s*ký)", re.I)
+_REGISTER_BTN_PATTERN = re.compile(r"(register|sign\s*up|create\s*account|continue|next|đăng\s*ký)", re.I)
+
+_EMAIL_PATTERN = re.compile(r"(email|e-?mail|username|user\s*name|phone|mobile|số\s*điện\s*thoại|tài\s*khoản)", re.I)
+_FULL_NAME_PATTERN = re.compile(r"(full\s*name|name|họ|tên)", re.I)
+_PASSWORD_PATTERN = re.compile(r"(password|mật\s*khẩu)", re.I)
+_CONFIRM_PW_PATTERN = re.compile(r"(confirm|verify|re\s*-?type|again|nhập\s*lại).*(password|mật\s*khẩu)", re.I)
+
+_SUBMIT_BTN_PATTERN = re.compile(r"(register|sign\s*up|create\s*account|submit|continue|next|đăng\s*ký)", re.I)
+
+_ERROR_SELECTOR = (
+    "[role='alert'], [role='status'], "
+    ".ant-form-item-explain-error, .ant-message-error, "
+    ".ant-message-notice .ant-message-custom-content, "
+    ".ant-notification-notice-message, .ant-notification-notice-description, "
+    ".MuiAlert-root, .Toastify__toast--error, "
+    ".error, .error-message, .text-danger, .invalid-feedback, "
+    ".el-message__content, .v-alert__content, .toast-message, .notification-message"
+)
 
 def _pick_visible(raw: Locator, timeout_ms: int = 8000) -> Locator:
     """

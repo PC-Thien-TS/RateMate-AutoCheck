@@ -28,7 +28,7 @@ jobs:
     env:
       # URL/config with precedence: dispatch input -> repo variables -> secrets -> default
       BASE_URL: ${{ inputs.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
-      LOGIN_PATH: ${{ vars.LOGIN_PATH || secrets.LOGIN_PATH || '/en/login' }}
+      LOGIN_PATH: ${{ vars.LOGIN_PATH || secrets.LOGIN_PATH || '/login' }}
       REGISTER_PATH: ${{ vars.REGISTER_PATH || secrets.REGISTER_PATH || '/en/login' }}
       # Credentials (optional; tests skip if missing)
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
