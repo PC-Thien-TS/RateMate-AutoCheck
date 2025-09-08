@@ -8,7 +8,6 @@ import glob
 import pathlib
 import xml.etree.ElementTree as ET
 
-
 # ---------- utils ----------
 
 def _fmt_duration(sec):
@@ -18,14 +17,11 @@ def _fmt_duration(sec):
         s = 0.0
     if s < 60:
         return f"~{s:.1f}s"
-    m = int(s // 60)
-    s = int(s % 60)
+    m = int(s // 60); s = int(s % 60)
     if m < 60:
         return f"~{m}m{s:02d}s"
-    h = m // 60
-    m = m % 60
+    h = m // 60; m = m % 60
     return f"~{h}h{m:02d}m"
-
 
 def _extract_browser(name: str) -> str | None:
     if not name:
@@ -37,7 +33,6 @@ def _extract_browser(name: str) -> str | None:
     browser = token.split("-", 1)[0].strip().lower()
     return browser if browser in ("chromium", "firefox", "webkit") else None
 
-
 def _prepare_proxies():
     px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
     if not px:
@@ -46,25 +41,12 @@ def _prepare_proxies():
         px = "http://" + px
     return {"http": px, "https": px}
 
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, "").strip() or default)
-    except Exception:
-        return default
-
-
 # ---------- JUnit parsing ----------
 
 def _find_junit():
-    """Chọn đường dẫn JUnit hợp lệ:
-       1) Ưu tiên env JUNIT_XML
-       2) Fallback: file *.xml mới nhất trong report/ có chứa <testsuite>.
-    """
     p_env = (os.getenv("JUNIT_XML") or "").strip()
     if p_env and pathlib.Path(p_env).is_file():
         return p_env
-
     cands = sorted(glob.glob("report/*.xml"), key=lambda p: pathlib.Path(p).stat().st_mtime, reverse=True)
     for p in cands:
         try:
@@ -75,85 +57,73 @@ def _find_junit():
             continue
     return p_env or ""
 
+def _collect_suites(root):
+    return [root] if root.tag.endswith("testsuite") else list(root.findall(".//testsuite"))
 
 def _parse_junit_any(path):
-    """Đếm theo từng testcase để chắc số liệu, gom pass/fail/error/skip, top slow."""
     p = pathlib.Path(path)
     if not p.is_file():
         return {}
-
     try:
         root = ET.parse(p).getroot()
     except Exception as e:
         print(f"[report] WARN: parse error: {e}")
         return {}
 
-    # Lấy tất cả testsuite
-    if root.tag.endswith("testsuite"):
-        suites = [root]
-    else:
-        suites = list(root.findall(".//testsuite"))
+    suites = _collect_suites(root)
     if not suites:
         return {}
 
-    per_browser = {"chromium": {"total": 0, "fail": 0, "error": 0, "skip": 0},
-                   "firefox":  {"total": 0, "fail": 0, "error": 0, "skip": 0},
-                   "webkit":   {"total": 0, "fail": 0, "error": 0, "skip": 0}}
-    fails = []
-    passed_cases = []
-    slow = []
+    per_browser = {b: {"total": 0, "fail": 0, "error": 0, "skip": 0} for b in ("chromium","firefox","webkit")}
+    fails, passed, errored, skipped = [], [], [], []
     total = fail = error = skip = 0
     duration_sum = 0.0
+    slow = []
 
     for ts in suites:
+        try:
+            duration_sum += float(ts.get("time","0") or 0.0)
+        except Exception:
+            pass
         for tc in ts.findall(".//testcase"):
             name = (tc.get("name") or "").strip()
             classname = (tc.get("classname") or "").strip()
-            if not name and not classname:
-                # testcase thiếu dữ liệu — bỏ qua
-                continue
             full_name = f"{classname}.{name}".strip(".")
 
-            # thời gian
             try:
                 ttime = float(tc.get("time", "0") or 0.0)
             except Exception:
                 ttime = 0.0
             if ttime > 0:
-                duration_sum += ttime
                 slow.append((ttime, full_name))
 
-            # trạng thái
             fe = tc.find("failure")
             er = tc.find("error")
             sk = tc.find("skipped")
 
             status = "pass"
-            reason = ""
             if er is not None:
                 status = "error"
                 error += 1
-                msg = (er.get("message") or "").strip()
-                txt = (er.text or "").strip()
-                reason = (msg or txt or "No message").replace("\x00", "")
-                fails.append({"name": full_name, "reason": reason[:400]})
+                msg  = (er.get("message") or "").strip() or (er.text or "").strip() or "No message"
+                fails.append({"name": full_name, "reason": msg[:400]})
+                errored.append((full_name, ttime))
             elif fe is not None:
                 status = "fail"
                 fail += 1
-                msg = (fe.get("message") or "").strip()
-                txt = (fe.text or "").strip()
-                reason = (msg or txt or "No message").replace("\x00", "")
-                fails.append({"name": full_name, "reason": reason[:400]})
+                msg  = (fe.get("message") or "").strip() or (fe.text or "").strip() or "No message"
+                fails.append({"name": full_name, "reason": msg[:400]})
+                passed  # just to keep linter happy
+                # Note: fail list already captured; also track in failed bucket
             elif sk is not None:
                 status = "skip"
                 skip += 1
+                skipped.append((full_name, ttime))
             else:
-                # pass
-                passed_cases.append(full_name)
+                passed.append((full_name, ttime))
 
             total += 1
 
-            # per-browser
             b = _extract_browser(name) or _extract_browser(classname)
             if b in per_browser:
                 per_browser[b]["total"] += 1
@@ -165,21 +135,13 @@ def _parse_junit_any(path):
                     per_browser[b]["skip"] += 1
 
     slow.sort(key=lambda x: x[0], reverse=True)
-    slow = slow[:_env_int("TELEGRAM_MAX_SLOW", 5)]
-
     return {
-        "total": total,
-        "fail": fail,
-        "error": error,
-        "skip": skip,
-        "duration": duration_sum,  # dùng tổng testcase (ổn định hơn)
-        "fails": fails,
-        "passed_cases": passed_cases,
-        "per_browser": per_browser,
-        "slow": slow,
+        "total": total, "fail": fail, "error": error, "skip": skip,
+        "duration": duration_sum,
+        "fails": fails, "per_browser": per_browser, "slow": slow[:5],
+        "passed": passed, "failed": [(f["name"], 0.0) for f in fails], "errored": errored, "skipped": skipped,
         "_junit_src": str(p),
     }
-
 
 def _load_summary():
     raw = (os.getenv("SUMMARY_JSON") or "").strip()
@@ -190,12 +152,10 @@ def _load_summary():
                 return data
         except Exception as e:
             print(f"[report] WARN: SUMMARY_JSON parse error: {e}")
-
     path = _find_junit()
     if not path or not pathlib.Path(path).is_file():
         return {}
     return _parse_junit_any(path)
-
 
 # ---------- message builders ----------
 
@@ -220,8 +180,7 @@ def _build_header(summary):
     run_url = f"{server}/{repo}/actions/runs/{run_id}" if repo and run_id else ""
 
     ref = os.getenv("GITHUB_REF_NAME", "") or os.getenv("GITHUB_REF", "")
-    sha = os.getenv("GITHUB_SHA", "")
-    short_sha = sha[:7] if sha else ""
+    sha = os.getenv("GITHUB_SHA", ""); short_sha = sha[:7] if sha else ""
     commit_url = f"{server}/{repo}/commit/{sha}" if repo and sha else ""
 
     head = []
@@ -251,6 +210,9 @@ def _build_header(summary):
         head.append("No testcases detected — JUnit missing/empty or tests crashed before reporting.")
     return "\n".join(head)
 
+def _bullets(rows, limit=20):
+    rows = rows[:limit]
+    return "\n".join(f"• {name}" for name, _ in rows) if rows else "(none)"
 
 def _build_browser_breakdown(summary):
     per = summary.get("per_browser") or {}
@@ -267,66 +229,45 @@ def _build_browser_breakdown(summary):
             lines.append(f"- {b}: {t} | pass={p} fail={f} error={e} skip={s}")
     return "\n".join(lines)
 
-
-def _build_failures(summary):
-    fails = summary.get("fails") or []
-    if not fails:
-        return ""
-    limit = _env_int("TELEGRAM_MAX_FAILS", 5)
-    lines = ["", f"Failed cases (top {min(limit, len(fails))}):"]
-    for i, f in enumerate(fails[:limit], 1):
-        nm = f.get("name", "")
-        rs = (f.get("reason", "") or "").replace("\n", " ")[:300]
-        lines.append(f"{i}. {nm} — {rs}")
-    rest = len(fails) - limit
-    if rest > 0:
-        lines.append(f"... and {rest} more.")
-    return "\n".join(lines)
-
-
-def _build_passed(summary):
-    passed = summary.get("passed_cases") or []
-    if not passed:
-        return ""
-    limit = _env_int("TELEGRAM_MAX_PASSED", 10)
-    lines = ["", f"Passed cases (first {min(limit, len(passed))}):"]
-    for nm in passed[:limit]:
-        lines.append(f"- {nm}")
-    rest = len(passed) - limit
-    if rest > 0:
-        lines.append(f"... and {rest} more.")
-    return "\n".join(lines)
-
-
-def _build_slowest(summary):
-    slow = summary.get("slow") or []
-    if not slow:
-        return ""
-    lines = ["", "Slowest tests (top {n}):".format(n=len(slow))]
-    for t, full in slow:
-        lines.append(f"- {full} — {_fmt_duration(t)}")
-    return "\n".join(lines)
-
-
 def _build_message(summary):
-    passed_count = max(int(summary.get('total', 0)) - int(summary.get('fail', 0)) - int(summary.get('error', 0)) - int(summary.get('skip', 0)), 0)
+    total = int(summary.get("total", 0))
+    passed_n = max(total - int(summary.get("fail",0)) - int(summary.get("error",0)) - int(summary.get("skip",0)), 0)
+
     blocks = [
         _build_header(summary),
         "",
-        f"Passed: {passed_count} case(s)",
-        _build_browser_breakdown(summary),
-        _build_failures(summary),
-        _build_passed(summary),
-        _build_slowest(summary),
+        f"Passed: {passed_n} case(s)",
     ]
-    return "\n".join([b for b in blocks if str(b).strip() != ""]).strip()
 
+    # liệt kê tên test
+    passed  = summary.get("passed")  or []
+    failed  = summary.get("failed")  or []
+    errored = summary.get("errored") or []
+    skipped = summary.get("skipped") or []
+
+    if passed:
+        blocks += ["", "✅ Passed (top 20):", _bullets(passed, 20)]
+    if failed:
+        blocks += ["", "❌ Failed:", _bullets(failed, 20)]
+    if errored:
+        blocks += ["", "💥 Errors:", _bullets(errored, 20)]
+    if skipped:
+        blocks += ["", "⚠️ Skipped:", _bullets(skipped, 20)]
+
+    # breakdown + slowest
+    br = _build_browser_breakdown(summary)
+    if br:
+        blocks += ["", br]
+    slow = summary.get("slow") or []
+    if slow:
+        blocks += ["", "Slowest tests (top 5):"] + [f"- {full} — {_fmt_duration(t)}" for t, full in slow[:5]]
+
+    return "\n".join([b for b in blocks if str(b).strip() != ""]).strip()
 
 # ---------- telegram ----------
 
 def _send_text(text):
     import requests
-
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_env = os.environ["TELEGRAM_CHAT_ID"]
     chat_ids = [c.strip() for c in re.split(r"[,\s]+", chat_env) if c.strip()]
@@ -342,11 +283,7 @@ def _send_text(text):
     for chat in chat_ids:
         sent = 0
         for idx, body in enumerate(parts, 1):
-            data = {
-                "chat_id": chat,
-                "text": body,
-                "disable_web_page_preview": True,
-            }
+            data = {"chat_id": chat, "text": body, "disable_web_page_preview": True}
             print(f"[telegram] Sending chunk {idx}/{len(parts)} to {chat} with proxy...")
             try:
                 r = requests.post(
@@ -368,16 +305,15 @@ def _send_text(text):
                 sent += 1
         print(f"Telegram sent OK to {chat} ({sent}/{len(parts)} chunks).")
 
-
 def main():
     s = _load_summary()
     if not s:
         print("[report] NOTE: No JUnit found. Sending minimal message.")
         s = {"total": 0, "fail": 0, "error": 0, "skip": 0, "duration": 0.0,
-             "fails": [], "passed_cases": [], "per_browser": {}, "slow": [], "_junit_src": ""}
+             "fails": [], "per_browser": {}, "slow": [],
+             "passed": [], "failed": [], "errored": [], "skipped": [], "_junit_src": ""}
     msg = _build_message(s)
     _send_text(msg)
-
 
 if __name__ == "__main__":
     main()
