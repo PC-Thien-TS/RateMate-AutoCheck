@@ -88,7 +88,9 @@ jobs:
               fi
               h="/app/report/e2e.html"
               if [ ! -s "${h}" ]; then
-                printf '%s\n' '<!doctype html><meta charset="utf-8"><title>E2E report</title><body><h3>No report generated</h3></body>' > "${h}"
+                cat > "${h}" <<'EOF'
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>E2E report</title></head><body><h3>No report generated (or tests crashed)</h3></body></html>
+EOF
                 echo "[fallback] wrote stub html to ${h}"
               fi
             '
@@ -119,7 +121,9 @@ jobs:
             echo "[host-fallback] wrote empty junit to report/junit.xml"
           fi
           if [ ! -s report/e2e.html ]; then
-            printf '%s\n' '<!doctype html><meta charset="utf-8"><title>E2E report</title><body><h3>No report generated</h3></body>' > report/e2e.html
+            cat > report/e2e.html <<'EOF'
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>E2E report</title></head><body><h3>No report generated (or tests crashed)</h3></body></html>
+EOF
             echo "[host-fallback] wrote stub html to report/e2e.html"
           fi
           echo "== ls report =="
