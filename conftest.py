@@ -138,3 +138,24 @@ def _patch_login_fill_force():
         _ch.fill_force = _fill_force  # type: ignore[attr-defined]
     except Exception:
         pass
+
+
+# ---------- Locale (single) for tests expecting `locale` fixture ----------
+
+import os as _os
+
+@pytest.fixture(scope="session")
+def locale(locales) -> str:
+    """Active locale code used in some smoke tests (defaults to 'en')."""
+    env = (_os.getenv("LOCALE") or "").strip()
+    if env:
+        return env
+    try:
+        if isinstance(locales, dict):
+            if "en" in locales:
+                return "en"
+            keys = list(locales.keys())
+            return keys[0] if keys else "en"
+    except Exception:
+        pass
+    return "en"
