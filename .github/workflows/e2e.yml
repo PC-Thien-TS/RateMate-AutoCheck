@@ -21,9 +21,12 @@ jobs:
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
+
       PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
+
       DISABLE_SITE_YAML: "1"
+
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
@@ -33,11 +36,18 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium)
+      - name: Run tests (Chromium, with keepalive & timeout)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
-          ( while true; do printf '.'; sleep 120; done ) & KPID=$$
+
+          (
+            while true; do
+              echo "[keepalive] $(date -u) running..."
+              sleep 30
+            done
+          ) &
+          KPID=$$
 
           set +e
           timeout 25m docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
@@ -48,8 +58,19 @@ jobs:
             -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
             -e E2E_EMAIL -e E2E_PASSWORD \
             -e DISABLE_SITE_YAML \
-            -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-            ratemate-tests || true
+            ratemate-tests \
+            bash -lc 'set -e
+              mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
+              pytest -vv -s tests/auth tests/smoke/test_routes.py \
+                --browser=chromium \
+                -p no:pytest_excel \
+                -o cache_dir=/tmp/pytest_cache \
+                --output=/tmp/test-results \
+                --screenshot=only-on-failure --video=off --tracing=off \
+                -o junit_family=xunit2 --junitxml=$JUNIT_XML \
+                --html=/app/report/e2e.html --self-contained-html \
+                -o log_cli=true -o log_cli_level=INFO --durations=10 || true
+            '
           RC=$?
 
           kill $KPID 2>/dev/null || true
@@ -58,16 +79,17 @@ jobs:
           if [ "$RC" = "124" ]; then
             echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
           fi
+
           exit 0
 
       - name: Copy report out
         if: always()
         run: |
           mkdir -p report
-          docker cp ratemate_e2e:/app/report/junit.xml report/junit.xml  || true
-          docker cp ratemate_e2e:/app/report/e2e.html  report/e2e.html   || true
+          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
+          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
           docker rm -f ratemate_e2e 2>/dev/null || true
-          ls -la report || true
+          echo "== ls report ==" && ls -la report || true
 
       - name: Parse JUnit → summary
         if: always()
@@ -117,7 +139,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Send Telegram (message)
+      - name: Send Telegram (message via Python)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -125,7 +147,8 @@ jobs:
           TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
           JUNIT_XML:          report/junit.xml
-        run: python Ci/report_telegram.py
+        run: |
+          python Ci/report_telegram.py
 
       - name: Send Telegram (attach HTML report)
         if: always()
@@ -140,12 +163,14 @@ jobs:
           if px and not (px.startswith("http") or px.startswith("socks")):
               px = "http://" + px
           proxies = {"http": px, "https": px} if px else None
+
           tok = os.environ["TELEGRAM_BOT_TOKEN"]
           chat = os.environ["TELEGRAM_CHAT_ID"]
           path = "report/e2e.html"
           if not os.path.isfile(path):
               print("No HTML report to attach.")
               raise SystemExit(0)
+
           with open(path, "rb") as f:
               files = {"document": ("e2e.html", f, "text/html")}
               data  = {"chat_id": chat, "caption": "E2E report"}
