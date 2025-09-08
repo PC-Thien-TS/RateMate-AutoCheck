@@ -40,8 +40,6 @@ jobs:
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
-
-          # keepalive để tránh GH cắt vì im lặng
           (
             while true; do
               echo "[keepalive] $(date -u) running..."
@@ -66,7 +64,7 @@ jobs:
             ratemate-tests \
             bash -lc 'set -euo pipefail
               mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
-              pytest -vv -s tests/auth tests/smoke/test_routes.py \
+              pytest -vv -s -p pytest_playwright tests/auth tests/smoke/test_routes.py \
                 --browser=chromium \
                 --base-url="${BASE_URL}" \
                 -p no:pytest_excel \
@@ -87,7 +85,7 @@ jobs:
               fi
               h="/app/report/e2e.html"
               if [ ! -s "${h}" ]; then
-                printf "%s\n" "<!doctype html><meta charset=\"utf-8\"><title>E2E report</title><body><h3>No report generated</h3></body>" > "${h}"
+                printf '%s\n' '<!doctype html><meta charset="utf-8"><title>E2E report</title><body><h3>No report generated</h3></body>' > "${h}"
                 echo "[fallback] wrote stub html to ${h}"
               fi
             '
@@ -100,7 +98,6 @@ jobs:
             echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
           fi
 
-          # luôn tiếp tục để còn copy báo cáo
           exit 0
 
       - name: Copy report out (and host fallback if missing)
@@ -111,7 +108,6 @@ jobs:
           docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
           docker rm -f ratemate_e2e 2>/dev/null || true
 
-          # Host fallback nếu vẫn không có
           if [ ! -s report/junit.xml ]; then
             ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
             printf "%s\n" "<?xml version=\"1.0\" encoding=\"utf-8\"?>" \
@@ -120,7 +116,7 @@ jobs:
             echo "[host-fallback] wrote empty junit to report/junit.xml"
           fi
           if [ ! -s report/e2e.html ]; then
-            printf "%s\n" "<!doctype html><meta charset=\"utf-8\"><title>E2E report</title><body><h3>No report generated</h3></body>" > report/e2e.html
+            printf '%s\n' '<!doctype html><meta charset="utf-8"><title>E2E report</title><body><h3>No report generated</h3></body>' > report/e2e.html
             echo "[host-fallback] wrote stub html to report/e2e.html"
           fi
           echo "== ls report =="
