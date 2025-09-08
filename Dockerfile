@@ -1,14 +1,13 @@
-# Image có sẵn browsers, ổn định hơn (1.46.1)
-FROM mcr.microsoft.com/playwright/python:v1.46.1-jammy
+# Dockerfile — Playwright base image khớp 1.47.0 (có sẵn browsers)
+FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CI=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    PWDEBUG=0
+    NODE_OPTIONS="--max-old-space-size=2048"
 
 WORKDIR /app
 
@@ -17,8 +16,6 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 RUN mkdir -p /app/report /tmp/pytest_cache /tmp/test-results
 COPY . /app
-
-USER root
 
 ENTRYPOINT ["bash","-lc"]
 CMD ["pytest -vv -s tests/auth tests/smoke/test_routes.py \
