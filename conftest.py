@@ -106,7 +106,7 @@ def _patch_login_fill_force():
     Patch này chạy tự động ở session để không phải sửa mã nguồn pages/.
     """
     try:
-        from pages.auth import login_page as _lp  # type: ignore
+        from pages import common_helpers as _ch  # type: ignore
     except Exception:
         # Nếu dự án không có module này (hoặc tên khác), bỏ qua patch
         return
@@ -135,6 +135,6 @@ def _patch_login_fill_force():
 
     # gắn patch
     try:
-        _lp._fill_force = _fill_force  # type: ignore[attr-defined]
+        _ch.fill_force = _fill_force  # type: ignore[attr-defined]
     except Exception:
         pass

@@ -1,52 +1,12 @@
 # pages/auth/login_page.py
 import re
 import contextlib
-from dataclasses import dataclass
 from typing import Optional
 
 from playwright.sync_api import Page, Locator
+from pages.common_helpers import ResponseLike, fill_force, is_inside_ion_searchbar
 
 # -------------------- helpers --------------------
-
-@dataclass
-class ResponseLike:
-    status: Optional[int] = None
-    url: Optional[str] = None
-    body: str = ""
-
-
-def _fill_force(locator: Locator, value, timeout: int = 10_000):
-    """
-    Điền giá trị vào input ổn định:
-    - Ưu tiên .fill() (nhanh, ít rủi ro)
-    - Nếu lỗi (DOM đặc thù), fallback JS set value + dispatch sự kiện
-    """
-    locator.wait_for(state="visible", timeout=timeout)
-    try:
-        locator.click()
-        locator.fill("")  # clear
-        locator.fill(str(value), timeout=timeout)
-    except Exception:
-        locator.evaluate(
-            """(el, v) => {
-                el.focus();
-                el.value = '';
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.value = String(v);
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }""",
-            str(value),
-        )
-
-
-def _is_inside_ion_searchbar(loc: Locator) -> bool:
-    try:
-        anc = loc.locator("xpath=ancestor::ion-searchbar[1]")
-        return anc.count() > 0
-    except Exception:
-        return False
-
 
 def _first_visible(loc: Locator, timeout_ms: int = 6000) -> Optional[Locator]:
     try:
@@ -163,7 +123,7 @@ class LoginPage:
             f = forms.nth(i)
             cand = f.locator(_EMAIL_INPUT_SELECTOR)
             el = _first_visible(cand, timeout_ms=3500)
-            if el and not _is_inside_ion_searchbar(el):
+            if el and not is_inside_ion_searchbar(el):
                 return el
 
         # 2) Thử bật password-mode rồi tìm lại
@@ -172,7 +132,7 @@ class LoginPage:
             f = forms.nth(i)
             cand = f.locator(_EMAIL_INPUT_SELECTOR)
             el = _first_visible(cand, timeout_ms=2500)
-            if el and not _is_inside_ion_searchbar(el):
+            if el and not is_inside_ion_searchbar(el):
                 return el
 
         # 3) Nếu có password thì tìm input “anh/chị em” trong container
@@ -199,7 +159,7 @@ class LoginPage:
                 cand = near_pwd.nth(i)
                 try:
                     cand.wait_for(state="visible", timeout=1200)
-                    if _is_inside_ion_searchbar(cand):
+                    if is_inside_ion_searchbar(cand):
                         continue
                     with contextlib.suppress(Exception):
                         ph = (cand.get_attribute("placeholder") or "").strip()
@@ -217,7 +177,7 @@ class LoginPage:
             self.page.get_by_role("textbox", name=_EMAIL_LABEL_PATTERN)
         )
         el = _first_visible(cand, timeout_ms=2000)
-        if el and not _is_inside_ion_searchbar(el):
+        if el and not is_inside_ion_searchbar(el):
             return el
 
         # 5) Fallback cuối: quét input toàn trang (loại password/search và ion-searchbar)
@@ -230,7 +190,7 @@ class LoginPage:
             cand = generic.nth(i)
             try:
                 cand.wait_for(state="visible", timeout=1000)
-                if _is_inside_ion_searchbar(cand):
+                if is_inside_ion_searchbar(cand):
                     continue
                 with contextlib.suppress(Exception):
                     ph = (cand.get_attribute("placeholder") or "").strip()
@@ -262,7 +222,7 @@ class LoginPage:
             self.page.get_by_role("textbox", name=rx)
         )
         el0 = _first_visible(cand0, timeout_ms=2000)
-        if el0 and not _is_inside_ion_searchbar(el0):
+        if el0 and not is_inside_ion_searchbar(el0):
             return el0
 
         forms = self.page.locator("form")
@@ -274,7 +234,7 @@ class LoginPage:
             f = forms.nth(i)
             cand = f.locator("input[type='password'], input[id*='pass' i], input[name*='pass' i]")
             el = _first_visible(cand, timeout_ms=3000)
-            if el and not _is_inside_ion_searchbar(el):
+            if el and not is_inside_ion_searchbar(el):
                 return el
 
         cand = self.page.locator(
@@ -283,12 +243,12 @@ class LoginPage:
             "input[autocomplete*='current-password' i], input[autocomplete*='password' i]"
         )
         el = _first_visible(cand, timeout_ms=3000)
-        if el and not _is_inside_ion_searchbar(el):
+        if el and not is_inside_ion_searchbar(el):
             return el
 
         cand2 = self.page.locator("input[placeholder*='password' i], input[placeholder*='mật' i]")
         el2 = _first_visible(cand2, timeout_ms=2000)
-        if el2 and not _is_inside_ion_searchbar(el2):
+        if el2 and not is_inside_ion_searchbar(el2):
             return el2
 
         # fallback cuối cùng
@@ -334,10 +294,10 @@ class LoginPage:
         self._switch_to_password_mode()
 
         email_input = self._email_input()
-        _fill_force(email_input, email)
+        fill_force(email_input, email)
 
         pwd = self._password_input()
-        _fill_force(pwd, password)
+        fill_force(pwd, password)
 
         form_scope = self._find_form_scope(email_input) or self._find_form_scope(pwd) or self.page
 
