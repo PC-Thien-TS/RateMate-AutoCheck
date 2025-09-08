@@ -25,9 +25,6 @@ jobs:
     timeout-minutes: 35
     permissions:
       contents: read
-    defaults:
-      run:
-        working-directory: RateMate-AutoCheck
     env:
       # URL/config with precedence: dispatch input -> repo variables -> secrets -> default
       BASE_URL: ${{ inputs.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
@@ -46,21 +43,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Determine project directory
+        id: detect
+        run: |
+          if [ -f "requirements.txt" ] && [ -d "tests" ]; then
+            echo "WORKDIR=." >> $GITHUB_ENV
+            echo "Detected project at repo root"
+          elif [ -d "RateMate-AutoCheck" ]; then
+            echo "WORKDIR=RateMate-AutoCheck" >> $GITHUB_ENV
+            echo "Detected project at RateMate-AutoCheck/"
+          else
+            echo "Project directory not found (requirements.txt/tests missing)." >&2
+            ls -la
+            exit 1
+          fi
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Python dependencies
+        working-directory: ${{ env.WORKDIR }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Install Playwright browsers
+        working-directory: ${{ env.WORKDIR }}
         run: |
           python -m playwright install --with-deps chromium webkit
 
       - name: Run tests (chromium + webkit)
+        working-directory: ${{ env.WORKDIR }}
         run: |
           mkdir -p report test-results
           pytest -vv tests \
@@ -74,12 +89,13 @@ jobs:
         with:
           name: e2e-artifacts-${{ github.run_number }}
           path: |
-            RateMate-AutoCheck/report/**
-            RateMate-AutoCheck/test-results/**
+            ${{ env.WORKDIR }}/report/**
+            ${{ env.WORKDIR }}/test-results/**
           if-no-files-found: warn
 
       - name: Telegram report (optional)
         if: ${{ always() }}
+        working-directory: ${{ env.WORKDIR }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
