@@ -5,51 +5,10 @@ import time
 import contextlib
 from typing import Optional
 from playwright.sync_api import Page, Locator
-
-
-class ResponseLike:
-    def __init__(self, status=None, url="", body=""):
-        self.status = status
-        self.url = url
-        self._body = body
-
-    def text(self) -> str:
-        return self._body or ""
+from pages.common_helpers import ResponseLike, fill_force, is_inside_ion_searchbar
 
 
 # ---------- helpers ----------
-
-def _is_inside_ion_searchbar(loc: Locator) -> bool:
-    try:
-        anc = loc.locator("xpath=ancestor::ion-searchbar[1]")
-        return anc.count() > 0
-    except Exception:
-        return False
-
-
-def _fill_force(locator: Locator, value, timeout: int = 10_000):
-    """
-    Điền giá trị vào input ổn định:
-    - Ưu tiên .fill() (nhanh, ít rủi ro)
-    - Nếu lỗi (DOM đặc thù), fallback JS set value + dispatch sự kiện
-    """
-    locator.wait_for(state="visible", timeout=timeout)
-    try:
-        locator.click()
-        locator.fill("")  # clear
-        locator.fill(str(value), timeout=timeout)
-    except Exception:
-        locator.evaluate(
-            """(el, v) => {
-                el.focus();
-                el.value = '';
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.value = String(v);
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }""",
-            str(value),
-        )
 
 
 def _pick_visible(raw: Locator, timeout_ms: int = 8000) -> Locator:
@@ -68,7 +27,7 @@ def _pick_visible(raw: Locator, timeout_ms: int = 8000) -> Locator:
             el = raw.nth(i)
             try:
                 el.wait_for(state="visible", timeout=400)
-                if not _is_inside_ion_searchbar(el):
+                if not is_inside_ion_searchbar(el):
                     return el
             except Exception:
                 continue
@@ -128,13 +87,13 @@ class RegisterPage:
         # ưu tiên email/username/phone
         loc = _input_union(self.page, _EMAIL_PATTERN.pattern)
         el = _pick_visible(loc, timeout_ms=5000)
-        _fill_force(el, email)
+        fill_force(el, email)
 
     def _fill_full_name(self, name: str):
         loc = _input_union(self.page, _FULL_NAME_PATTERN.pattern)
         el = _pick_visible(loc, timeout_ms=4000)
         with contextlib.suppress(Exception):
-            _fill_force(el, name)
+            fill_force(el, name)
 
     def _fill_password(self, pw: str):
         # gồm cả placeholder 'password' dù type không hẳn password
@@ -148,14 +107,14 @@ class RegisterPage:
             )
         )
         el = _pick_visible(loc, timeout_ms=5000)
-        _fill_force(el, pw)
+        fill_force(el, pw)
 
     def _fill_confirm(self, pw: str):
         # confirm/verify/retype
         loc = _input_union(self.page, _CONFIRM_PW_PATTERN.pattern)
         el = _pick_visible(loc, timeout_ms=4000)
         with contextlib.suppress(Exception):
-            _fill_force(el, pw)
+            fill_force(el, pw)
 
     def _click_submit(self):
         cand = self.page.get_by_role("button", name=_SUBMIT_BTN_PATTERN).or_(
