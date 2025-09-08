@@ -47,6 +47,13 @@ def _prepare_proxies():
     return {"http": px, "https": px}
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "").strip() or default)
+    except Exception:
+        return default
+
+
 # ---------- JUnit parsing ----------
 
 def _find_junit():
@@ -70,7 +77,7 @@ def _find_junit():
 
 
 def _parse_junit_any(path):
-    """Đếm theo từng testcase để chắc số liệu."""
+    """Đếm theo từng testcase để chắc số liệu, gom pass/fail/error/skip, top slow."""
     p = pathlib.Path(path)
     if not p.is_file():
         return {}
@@ -93,6 +100,7 @@ def _parse_junit_any(path):
                    "firefox":  {"total": 0, "fail": 0, "error": 0, "skip": 0},
                    "webkit":   {"total": 0, "fail": 0, "error": 0, "skip": 0}}
     fails = []
+    passed_cases = []
     slow = []
     total = fail = error = skip = 0
     duration_sum = 0.0
@@ -101,7 +109,11 @@ def _parse_junit_any(path):
         for tc in ts.findall(".//testcase"):
             name = (tc.get("name") or "").strip()
             classname = (tc.get("classname") or "").strip()
+            if not name and not classname:
+                # testcase thiếu dữ liệu — bỏ qua
+                continue
             full_name = f"{classname}.{name}".strip(".")
+
             # thời gian
             try:
                 ttime = float(tc.get("time", "0") or 0.0)
@@ -137,7 +149,7 @@ def _parse_junit_any(path):
                 skip += 1
             else:
                 # pass
-                pass
+                passed_cases.append(full_name)
 
             total += 1
 
@@ -153,7 +165,7 @@ def _parse_junit_any(path):
                     per_browser[b]["skip"] += 1
 
     slow.sort(key=lambda x: x[0], reverse=True)
-    slow = slow[:5]
+    slow = slow[:_env_int("TELEGRAM_MAX_SLOW", 5)]
 
     return {
         "total": total,
@@ -162,6 +174,7 @@ def _parse_junit_any(path):
         "skip": skip,
         "duration": duration_sum,  # dùng tổng testcase (ổn định hơn)
         "fails": fails,
+        "passed_cases": passed_cases,
         "per_browser": per_browser,
         "slow": slow,
         "_junit_src": str(p),
@@ -259,11 +272,29 @@ def _build_failures(summary):
     fails = summary.get("fails") or []
     if not fails:
         return ""
-    lines = ["", "Failed cases (top 5):"]
-    for i, f in enumerate(fails[:5], 1):
+    limit = _env_int("TELEGRAM_MAX_FAILS", 5)
+    lines = ["", f"Failed cases (top {min(limit, len(fails))}):"]
+    for i, f in enumerate(fails[:limit], 1):
         nm = f.get("name", "")
         rs = (f.get("reason", "") or "").replace("\n", " ")[:300]
         lines.append(f"{i}. {nm} — {rs}")
+    rest = len(fails) - limit
+    if rest > 0:
+        lines.append(f"... and {rest} more.")
+    return "\n".join(lines)
+
+
+def _build_passed(summary):
+    passed = summary.get("passed_cases") or []
+    if not passed:
+        return ""
+    limit = _env_int("TELEGRAM_MAX_PASSED", 10)
+    lines = ["", f"Passed cases (first {min(limit, len(passed))}):"]
+    for nm in passed[:limit]:
+        lines.append(f"- {nm}")
+    rest = len(passed) - limit
+    if rest > 0:
+        lines.append(f"... and {rest} more.")
     return "\n".join(lines)
 
 
@@ -271,20 +302,21 @@ def _build_slowest(summary):
     slow = summary.get("slow") or []
     if not slow:
         return ""
-    lines = ["", "Slowest tests (top 5):"]
-    for t, full in slow[:5]:
+    lines = ["", "Slowest tests (top {n}):".format(n=len(slow))]
+    for t, full in slow:
         lines.append(f"- {full} — {_fmt_duration(t)}")
     return "\n".join(lines)
 
 
 def _build_message(summary):
-    passed = max(int(summary.get('total', 0)) - int(summary.get('fail', 0)) - int(summary.get('error', 0)) - int(summary.get('skip', 0)), 0)
+    passed_count = max(int(summary.get('total', 0)) - int(summary.get('fail', 0)) - int(summary.get('error', 0)) - int(summary.get('skip', 0)), 0)
     blocks = [
         _build_header(summary),
         "",
-        f"Passed: {passed} case(s)",
+        f"Passed: {passed_count} case(s)",
         _build_browser_breakdown(summary),
         _build_failures(summary),
+        _build_passed(summary),
         _build_slowest(summary),
     ]
     return "\n".join([b for b in blocks if str(b).strip() != ""]).strip()
@@ -342,7 +374,7 @@ def main():
     if not s:
         print("[report] NOTE: No JUnit found. Sending minimal message.")
         s = {"total": 0, "fail": 0, "error": 0, "skip": 0, "duration": 0.0,
-             "fails": [], "per_browser": {}, "slow": [], "_junit_src": ""}
+             "fails": [], "passed_cases": [], "per_browser": {}, "slow": [], "_junit_src": ""}
     msg = _build_message(s)
     _send_text(msg)
 

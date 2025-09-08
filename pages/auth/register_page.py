@@ -1,29 +1,89 @@
 # pages/auth/register_page.py
 from __future__ import annotations
-import re, time, contextlib
+import re
+import time
+import contextlib
 from typing import Optional
 from playwright.sync_api import Page, Locator
+
 
 class ResponseLike:
     def __init__(self, status=None, url="", body=""):
         self.status = status
         self.url = url
         self._body = body
-    def text(self): return self._body or ""
+
+    def text(self) -> str:
+        return self._body or ""
+
+
+# ---------- helpers ----------
+
+def _is_inside_ion_searchbar(loc: Locator) -> bool:
+    try:
+        anc = loc.locator("xpath=ancestor::ion-searchbar[1]")
+        return anc.count() > 0
+    except Exception:
+        return False
+
+
+def _fill_force(locator: Locator, value, timeout: int = 10_000):
+    """
+    Điền giá trị vào input ổn định:
+    - Ưu tiên .fill() (nhanh, ít rủi ro)
+    - Nếu lỗi (DOM đặc thù), fallback JS set value + dispatch sự kiện
+    """
+    locator.wait_for(state="visible", timeout=timeout)
+    try:
+        locator.click()
+        locator.fill("")  # clear
+        locator.fill(str(value), timeout=timeout)
+    except Exception:
+        locator.evaluate(
+            """(el, v) => {
+                el.focus();
+                el.value = '';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.value = String(v);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            str(value),
+        )
+
 
 def _pick_visible(raw: Locator, timeout_ms: int = 8000) -> Locator:
-    end = time.time() + timeout_ms/1000
-    while time.time() < end:
-        with contextlib.suppress(Exception):
-            n = raw.count()
-            for i in range(min(n, 10)):
-                el = raw.nth(i)
-                if el.is_visible():
+    """
+    Chọn phần tử đầu tiên "visible" trong nhóm. Đợi tối đa timeout_ms.
+    Bỏ qua node nằm trong ion-searchbar.
+    """
+    deadline = time.time() + timeout_ms / 1000.0
+    last_first = raw.first
+    while time.time() < deadline:
+        try:
+            n = min(raw.count(), 12)
+        except Exception:
+            n = 0
+        for i in range(n):
+            el = raw.nth(i)
+            try:
+                el.wait_for(state="visible", timeout=400)
+                if not _is_inside_ion_searchbar(el):
                     return el
-        raw.page.wait_for_timeout(120)
-    return raw.first
+            except Exception:
+                continue
+        # backoff ngắn rồi thử lại
+        try:
+            raw.page.wait_for_timeout(120)
+        except Exception:
+            pass
+    return last_first
 
-def _input_union(scope, patterns: str) -> Locator:
+
+def _input_union(scope: Locator, patterns: str) -> Locator:
+    """
+    Gom ứng viên input theo label / placeholder / role / input thường.
+    """
     rx = re.compile(patterns, re.IGNORECASE)
     return scope.get_by_label(rx).or_(
         scope.get_by_placeholder(rx)
@@ -32,6 +92,9 @@ def _input_union(scope, patterns: str) -> Locator:
     ).or_(
         scope.locator("input, textarea, [contenteditable], [contenteditable='true']")
     )
+
+
+# ---------- Page Object ----------
 
 class RegisterPage:
     def __init__(self, page: Page, base_url: str, path: str):
@@ -44,41 +107,76 @@ class RegisterPage:
 
     def _open_register_ui(self):
         with contextlib.suppress(Exception):
-            tab = self.page.get_by_role("tab", name=re.compile(r"(register|sign\s*up)", re.I))
+            tab = self.page.get_by_role(
+                "tab", name=re.compile(r"(register|sign\s*up|đăng\s*ký)", re.I)
+            )
             if tab.count() > 0:
-                tab.first.click()
+                t = tab.first
+                t.wait_for(state="visible", timeout=800)
+                t.click(timeout=800)
+                self.page.wait_for_timeout(150)
+
+        with contextlib.suppress(Exception):
+            btn = self.page.get_by_role(
+                "button", name=re.compile(r"(register|sign\s*up|create\s*account|đăng\s*ký)", re.I)
+            )
+            if btn.count() > 0:
+                b = btn.first
+                b.wait_for(state="visible", timeout=800)
+                b.click(timeout=800)
+                self.page.wait_for_timeout(150)
+
+    # ----- field fills -----
 
     def _fill_email(self, email: str):
-        el = _pick_visible(_input_union(self.page, r"(e-?mail|email)"))
-        with contextlib.suppress(Exception): el.fill("")
-        el.fill(email)
+        # ưu tiên email/username/phone
+        loc = _input_union(self.page, r"(e-?mail|email|username|user\s*name|phone|mobile|điện\s*thoại)")
+        el = _pick_visible(loc, timeout_ms=5000)
+        _fill_force(el, email)
 
     def _fill_full_name(self, name: str):
-        el = _pick_visible(_input_union(self.page, r"(full\s*name|name|họ|tên)"))
-        with contextlib.suppress(Exception): el.fill("")
-        with contextlib.suppress(Exception): el.fill(name)
+        loc = _input_union(self.page, r"(full\s*name|name|họ|tên)")
+        el = _pick_visible(loc, timeout_ms=4000)
+        with contextlib.suppress(Exception):
+            _fill_force(el, name)
 
     def _fill_password(self, pw: str):
-        el = _pick_visible(_input_union(self.page, r"(password|mật\s*khẩu)"))
-        with contextlib.suppress(Exception): el.fill("")
-        el.fill(pw)
+        # gồm cả placeholder 'password' dù type không hẳn password
+        loc = self.page.get_by_label(re.compile(r"(password|mật\s*khẩu)", re.I)).or_(
+            self.page.get_by_placeholder(re.compile(r"(password|mật\s*khẩu)", re.I))
+        ).or_(
+            self.page.locator(
+                "input[type='password'], "
+                "input[id*='pass' i], input[name*='pass' i], "
+                "input[autocomplete*='current-password' i], input[autocomplete*='password' i]"
+            )
+        )
+        el = _pick_visible(loc, timeout_ms=5000)
+        _fill_force(el, pw)
 
     def _fill_confirm(self, pw: str):
-        el = _pick_visible(_input_union(self.page, r"(confirm|nhập\s*lại|re-?type|verify)"))
-        with contextlib.suppress(Exception): el.fill("")
-        with contextlib.suppress(Exception): el.fill(pw)
+        # confirm/verify/retype
+        loc = _input_union(self.page, r"(confirm|nhập\s*lại|re-?type|verify|repeat|xác\s*nhận)")
+        el = _pick_visible(loc, timeout_ms=4000)
+        with contextlib.suppress(Exception):
+            _fill_force(el, pw)
 
     def _click_submit(self):
-        btn = _pick_visible(
-            self.page.get_by_role("button", name=re.compile(r"(sign\s*up|register|create\s*account|submit)", re.I))
-            .or_(self.page.locator("button[type='submit'], input[type='submit']"))
+        cand = self.page.get_by_role(
+            "button",
+            name=re.compile(r"(sign\s*up|register|create\s*account|submit|đăng\s*ký|tạo\s*tài\s*khoản)", re.I),
+        ).or_(
+            self.page.locator("button[type='submit'], input[type='submit']")
         )
+        btn = _pick_visible(cand, timeout_ms=5000)
         with contextlib.suppress(Exception):
+            btn.wait_for(state="attached", timeout=600)
             btn.click(timeout=3000)
 
+    # ----- feedback -----
+
     def visible_error_text(self, timeout: int = 5000) -> str:
-        end = time.time() + timeout/1000
-        # mở rộng selector: alert/status/message phổ biến
+        end = time.time() + timeout / 1000.0
         loc = self.page.locator(
             "[role='alert'], [role='status'], "
             ".ant-form-item-explain-error, .ant-message-error, .ant-message-notice .ant-message-custom-content, "
@@ -89,12 +187,16 @@ class RegisterPage:
         )
         while time.time() < end:
             with contextlib.suppress(Exception):
-                if loc.count() > 0 and loc.first.is_visible():
-                    t = (loc.first.inner_text(timeout=300) or "").strip()
+                if loc.count() > 0:
+                    el = loc.first
+                    el.wait_for(state="visible", timeout=400)
+                    t = (el.inner_text(timeout=300) or "").strip()
                     if t:
                         return t
             self.page.wait_for_timeout(120)
         return ""
+
+    # ----- main action -----
 
     def register_email(
         self,
@@ -102,30 +204,37 @@ class RegisterPage:
         password: str,
         full_name: Optional[str] = None,
         confirm_password: Optional[str] = None,
-        wait_response_ms: int = 12000,
+        wait_response_ms: int = 12_000,
     ) -> ResponseLike:
         self._open_register_ui()
         if full_name:
             self._fill_full_name(full_name)
         self._fill_email(email)
         self._fill_password(password)
-        self._fill_confirm(confirm_password or password)
+        # nếu confirm field không tồn tại thì _pick_visible sẽ trả về first hợp lệ; try/except để không crash
+        with contextlib.suppress(Exception):
+            self._fill_confirm(confirm_password or password)
 
         # chờ response POST/PUT/PATCH tới endpoint liên quan register
         patt = re.compile(r"(signup|sign[-_]?up|register|users|auth)", re.I)
-        status=None; url=self.page.url; body=""
+        status, url, body = None, self.page.url, ""
         with contextlib.suppress(Exception):
             with self.page.expect_response(
-                lambda r: r.request and r.request.method in ("POST","PUT","PATCH") and patt.search(r.url or ""),
-                timeout=wait_response_ms
-            ) as resp:
+                lambda r: r.request
+                and r.request.method in ("POST", "PUT", "PATCH")
+                and patt.search(r.url or ""),
+                timeout=wait_response_ms,
+            ) as resp_ctx:
                 self._click_submit()
-            r = resp.value
-            with contextlib.suppress(Exception): status = r.status if hasattr(r, "status") else r.status()
-            with contextlib.suppress(Exception): url = r.url
-            with contextlib.suppress(Exception): body = r.text() or ""
+            r = resp_ctx.value
+            with contextlib.suppress(Exception):
+                status = r.status if hasattr(r, "status") else r.status()
+            with contextlib.suppress(Exception):
+                url = r.url
+            with contextlib.suppress(Exception):
+                body = r.text() or ""
 
         with contextlib.suppress(Exception):
-            self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+            self.page.wait_for_load_state("domcontentloaded", timeout=5_000)
 
         return ResponseLike(status=status, url=url, body=body)
