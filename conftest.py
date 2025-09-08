@@ -2,7 +2,7 @@
 
 import os
 import pytest
-
+from typing import Generator
 
 # ---------- Session-level config/fixtures ----------
 
@@ -17,15 +17,17 @@ def base_url(pytestconfig) -> str:
     """
     Lấy base-url từ --base-url (plugin pytest-base-url) nếu có,
     nếu không thì fallback sang biến môi trường.
+    Trả về dạng không có dấu '/' ở cuối để tránh '//'.
     """
     cli = getattr(pytestconfig.option, "base_url", None)
     if cli:
-        return cli
-    return (
+        return str(cli).rstrip("/")
+    env_url = (
         os.environ.get("BASE_URL")
         or os.environ.get("BASE_URL_PROD")
         or ""
     )
+    return env_url.rstrip("/")
 
 
 @pytest.fixture(scope="session")

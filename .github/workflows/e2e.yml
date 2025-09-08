@@ -3,7 +3,7 @@ name: E2E
 on:
   schedule:
     - cron: "0 0,8,16 * * *"
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 concurrency:
   group: e2e
@@ -26,6 +26,7 @@ jobs:
       PROTECTED_ROUTES: "/store,/product,/QR"
       DISABLE_SITE_YAML: "1"
 
+      # Secrets cho auth
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
@@ -35,10 +36,12 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium, keepalive & timeout + fallback artifacts)
+      - name: Run tests (Chromium, with keepalive & timeout)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
+
+          # keepalive để tránh GH cắt vì im lặng
           (
             while true; do
               echo "[keepalive] $(date -u) running..."
@@ -74,7 +77,7 @@ jobs:
                 --html=/app/report/e2e.html --self-contained-html \
                 -o log_cli=true -o log_cli_level=INFO --durations=10 || true
 
-              # Fallback: always generate junit & html
+              # Fallback: luôn tạo junit & html nếu thiếu (bên trong container)
               if [ ! -s "${JUNIT_XML}" ]; then
                 ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
                 printf "%s\n" "<?xml version=\"1.0\" encoding=\"utf-8\"?>" \
@@ -96,21 +99,23 @@ jobs:
           if [ "$RC" = "124" ]; then
             echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
           fi
+
+          # luôn tiếp tục để còn copy báo cáo
           exit 0
 
-      - name: Copy report out (with host-side fallback)
+      - name: Copy report out (and host fallback if missing)
         if: always()
         run: |
           mkdir -p report
-          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  2>/dev/null || true
-          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   2>/dev/null || true
+          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
+          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
           docker rm -f ratemate_e2e 2>/dev/null || true
 
-          # Host fallback if files missing
+          # Host fallback nếu vẫn không có
           if [ ! -s report/junit.xml ]; then
             ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
             printf "%s\n" "<?xml version=\"1.0\" encoding=\"utf-8\"?>" \
-              "<testsuites><testsuite name=\"pytest\" tests=\"0\" failures=\"0\" errors=\"0\" skipped=\"0\" time=\"0\" timestamp=\"${ts}\" hostname=\"ci\"/></testsuites>" \
+              "<testsuites><testsuite name=\"pytest\" tests=\"0\" failures=\"0\" errors=\"0\" skipped=\"0\" time=\"0\" timestamp=\"${ts}\" hostname=\"host\"/></testsuites>" \
               > report/junit.xml
             echo "[host-fallback] wrote empty junit to report/junit.xml"
           fi
@@ -118,8 +123,8 @@ jobs:
             printf "%s\n" "<!doctype html><meta charset=\"utf-8\"><title>E2E report</title><body><h3>No report generated</h3></body>" > report/e2e.html
             echo "[host-fallback] wrote stub html to report/e2e.html"
           fi
-
-          echo "== ls report ==" && ls -la report || true
+          echo "== ls report =="
+          ls -la report || true
 
       - name: Parse JUnit → summary
         if: always()
@@ -135,11 +140,9 @@ jobs:
                   ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
                   if ts is not None:
                       def g(a):
-                          v = ts.get(a, "0") or "0"
-                          try:
-                              return int(float(v))
-                          except Exception:
-                              return 0
+                          v = ts.get(a, "0")
+                          try: return int(float(v))
+                          except: return 0
                       out = {
                           "total": g("tests"),
                           "fail": g("failures"),
@@ -151,7 +154,7 @@ jobs:
                       for tc in ts.findall(".//testcase"):
                           fe = tc.find("failure") or tc.find("error")
                           if fe is not None:
-                              name = f"{tc.get('classname','')}.{tc.get('name')}"
+                              name = f"{tc.get('classname','')}.{tc.get('name')}".strip(".")
                               msg  = (fe.get("message") or "").strip()
                               txt  = (fe.text or "").strip()
                               out["fails"].append({"name": name, "reason": (msg or txt or 'No message')[:400]})
@@ -160,6 +163,57 @@ jobs:
           val = json.dumps(out, ensure_ascii=False) if out else ""
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"summary_json={val}\n")
+          PY
+
+      - name: List testcases (console & summary)
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          p = pathlib.Path("report/junit.xml")
+          if not p.exists():
+              print("No junit.xml to list.")
+              raise SystemExit(0)
+          root = ET.parse(p).getroot()
+          ts = root if root.tag.endswith("testsuite") else root.find(".//testsuite")
+          if ts is None:
+              print("No <testsuite> in junit.xml.")
+              raise SystemExit(0)
+          passed, failed, errored, skipped = [], [], [], []
+          for tc in ts.findall(".//testcase"):
+              name = f"{tc.get('classname','')}.{tc.get('name')}".strip(".")
+              try: t = float(tc.get('time','0') or 0)
+              except: t = 0.0
+              if tc.find('skipped') is not None:
+                  skipped.append((name, t))
+              elif tc.find('failure') is not None:
+                  failed.append((name, t))
+              elif tc.find('error') is not None:
+                  errored.append((name, t))
+              else:
+                  passed.append((name, t))
+          def fmt(rows): return "\n".join(f"• {n} [{t:.2f}s]" for n,t in rows) or "(none)"
+          print("\n=== PASSED ===");  print(fmt(passed))
+          print("\n=== FAILED ===");  print(fmt(failed))
+          print("\n=== ERRORED ==="); print(fmt(errored))
+          print("\n=== SKIPPED ==="); print(fmt(skipped))
+          summ = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summ:
+              with open(summ, "a", encoding="utf-8") as fh:
+                  fh.write("## Testcases\n\n")
+                  def md(rows, title):
+                      fh.write(f"### {title}\n\n")
+                      if rows:
+                          fh.write("| Testcase | Time (s) |\n|---|---:|\n")
+                          for n,t in rows:
+                              fh.write(f"| `{n}` | {t:.2f} |\n")
+                      else:
+                          fh.write("_(none)_\n")
+                      fh.write("\n")
+                  md(passed,  "Passed")
+                  md(failed,  "Failed")
+                  md(errored, "Errored")
+                  md(skipped, "Skipped")
           PY
 
       - name: Setup Python for notification
@@ -195,17 +249,15 @@ jobs:
           python3 - <<'PY'
           import os, requests, os.path
           px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-          if px and not (px.startswith("http") or px.startswith("socks")):
+          if px and not (px.startswith("http://") or px.startswith("https://") or px.startswith("socks")):
               px = "http://" + px
           proxies = {"http": px, "https": px} if px else None
-
           tok = os.environ["TELEGRAM_BOT_TOKEN"]
           chat = os.environ["TELEGRAM_CHAT_ID"]
           path = "report/e2e.html"
           if not os.path.isfile(path):
               print("No HTML report to attach.")
               raise SystemExit(0)
-
           with open(path, "rb") as f:
               files = {"document": ("e2e.html", f, "text/html")}
               data  = {"chat_id": chat, "caption": "E2E report"}
