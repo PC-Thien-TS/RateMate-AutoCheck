@@ -168,3 +168,16 @@ def all_routes(public_routes, protected_routes):
         [{"kind": "public", "path": p} for p in public_routes]
         + [{"kind": "protected", "path": p} for p in protected_routes]
     )
+
+
+# Override locales fixture with environment-driven version
+@pytest.fixture(scope="session")
+def locales() -> dict[str, str]:
+    """Locale map driven by LOCALES env (csv). Defaults to English only."""
+    raw = (os.getenv("LOCALES") or os.getenv("SITE_LOCALES") or "en").strip()
+    codes = [c.strip().lower() for c in raw.split(",") if c.strip()]
+    labels = {"en": "English", "vi": "Tiếng Việt"}
+    out = {}
+    for c in codes:
+        out[c] = labels.get(c, c)
+    return out or {"en": "English"}
