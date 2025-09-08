@@ -248,22 +248,49 @@ jobs:
         run: |
           python3 - <<'PY'
           import os, requests, os.path
-          px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-          if px and not (px.startswith("http://") or px.startswith("https://") or px.startswith("socks")):
-              px = "http://" + px
-          proxies = {"http": px, "https": px} if px else None
-          tok = os.environ["TELEGRAM_BOT_TOKEN"]
+
+          def build_proxies():
+              px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+              if px and not (px.startswith("http://") or px.startswith("https://") or px.startswith("socks")):
+                  px = "http://" + px
+              return {"http": px, "https": px} if px else None
+
+          tok  = os.environ["TELEGRAM_BOT_TOKEN"]
           chat = os.environ["TELEGRAM_CHAT_ID"]
           path = "report/e2e.html"
           if not os.path.isfile(path):
               print("No HTML report to attach."); raise SystemExit(0)
+
           with open(path, "rb") as f:
               files = {"document": ("e2e.html", f, "text/html")}
               data  = {"chat_id": chat, "caption": "E2E report"}
-              r = requests.post(f"https://api.telegram.org/bot{tok}/sendDocument",
-                                data=data, files=files, timeout=60, proxies=proxies)
-              r.raise_for_status()
-              print("Telegram document sent.")
+
+              # 1) Thử gửi qua proxy (nếu có)
+              try:
+                  print("[telegram] sending document with proxy (if set)...")
+                  r = requests.post(
+                      f"https://api.telegram.org/bot{tok}/sendDocument",
+                      data=data, files=files, timeout=60, proxies=build_proxies()
+                  )
+                  r.raise_for_status()
+                  print("Telegram document sent (proxy).")
+              except Exception as e:
+                  # 2) Retry direct: vô hiệu ENV proxy
+                  try:
+                      print(f"[telegram] proxy failed: {e}; retrying direct without env proxies...")
+                      f.seek(0)  # reopen buffer
+                      s = requests.Session()
+                      s.trust_env = False     # <-- không đọc HTTP(S)_PROXY từ env
+                      r = s.post(
+                          f"https://api.telegram.org/bot{tok}/sendDocument",
+                          data=data, files=files, timeout=60, proxies={}
+                      )
+                      r.raise_for_status()
+                      print("Telegram document sent (direct).")
+                  except Exception as e2:
+                      # Không làm fail workflow
+                      print(f"[telegram] direct failed: {e2}; skip attaching HTML.")
+                      raise SystemExit(0)
           PY
 
       - name: Upload HTML report
