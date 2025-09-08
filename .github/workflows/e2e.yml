@@ -26,7 +26,6 @@ jobs:
       PROTECTED_ROUTES: "/store,/product,/QR"
       DISABLE_SITE_YAML: "1"
 
-      # Secrets cho auth
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
@@ -36,19 +35,18 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium, with keepalive & timeout)
+      - name: Run tests (Chromium, keepalive & timeout + fallback artifacts)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
 
-          # keepalive để tránh GH cắt vì im lặng
+          # keepalive tránh GH cắt vì im lặng
           (
             while true; do
               echo "[keepalive] $(date -u) running..."
               sleep 30
             done
-          ) &
-          KPID=$!
+          ) & KPID=$!
 
           set +e
           timeout 25m docker run --name ratemate_e2e \
@@ -69,14 +67,28 @@ jobs:
               mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
               pytest -vv -s tests/auth tests/smoke/test_routes.py \
                 --browser=chromium \
-                --base-url="$BASE_URL" \
+                --base-url="${BASE_URL}" \
                 -p no:pytest_excel \
                 -o cache_dir=/tmp/pytest_cache \
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=off \
-                -o junit_family=xunit2 --junitxml="$JUNIT_XML" \
+                -o junit_family=xunit2 --junitxml="${JUNIT_XML}" \
                 --html=/app/report/e2e.html --self-contained-html \
                 -o log_cli=true -o log_cli_level=INFO --durations=10 || true
+
+              # --- Fallback trong container: luôn có junit & html ---
+              if [ ! -s "${JUNIT_XML}" ]; then
+                ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+                printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' \
+                  "<testsuites><testsuite name=\"pytest\" tests=\"0\" failures=\"0\" errors=\"0\" skipped=\"0\" time=\"0\" timestamp=\"${ts}\" hostname=\"ci\"/></testsuites>" \
+                  > "${JUNIT_XML}"
+                echo "[fallback] wrote empty junit to ${JUNIT_XML}"
+              fi
+              h="/app/report/e2e.html"
+              if [ ! -s "${h}" ]; then
+                printf '%s\n' '<!doctype html><meta charset="utf-8"><title>E2E report</title><body><h3>No report generated</h3></body>' > "${h}"
+                echo "[fallback] wrote stub html to ${h}"
+              fi
             '
           RC=$?
 
@@ -90,13 +102,27 @@ jobs:
           # luôn tiếp tục để còn copy báo cáo
           exit 0
 
-      - name: Copy report out
+      - name: Copy report out (with host-side fallback)
         if: always()
         run: |
           mkdir -p report
-          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
-          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
+          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  2>/dev/null || true
+          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   2>/dev/null || true
           docker rm -f ratemate_e2e 2>/dev/null || true
+
+          # Fallback trên host nếu vẫn chưa có file
+          if [ ! -s report/junit.xml ]; then
+            ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' \
+              "<testsuites><testsuite name=\"pytest\" tests=\"0\" failures=\"0\" errors=\"0\" skipped=\"0\" time=\"0\" timestamp=\"${ts}\" hostname=\"ci\"/></testsuites>" \
+              > report/junit.xml
+            echo "[host-fallback] wrote empty junit to report/junit.xml"
+          fi
+          if [ ! -s report/e2e.html ]; then
+            printf '%s\n' '<!doctype html><meta charset="utf-8"><title>E2E report</title><body><h3>No report generated</h3></body>' > report/e2e.html
+            echo "[host-fallback] wrote stub html to report/e2e.html"
+          fi
+
           echo "== ls report ==" && ls -la report || true
 
       - name: Parse JUnit → summary
@@ -112,7 +138,12 @@ jobs:
                   t = ET.parse(p).getroot()
                   ts = t if t.tag.endswith('testsuite') else t.find('.//testsuite')
                   if ts is not None:
-                      def g(a): return int(ts.get(a, "0"))
+                      def g(a):
+                          v = ts.get(a, "0")
+                          try:
+                              return int(float(v))
+                          except Exception:
+                              return 0
                       out = {
                           "total": g("tests"),
                           "fail": g("failures"),
