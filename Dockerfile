@@ -17,6 +17,9 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 RUN mkdir -p /app/report /tmp/pytest_cache /tmp/test-results
 COPY . /app
 
+# Debug: List test files before running pytest
+RUN echo "== Test files ==" && ls -R /app/tests || true
+
 ENTRYPOINT ["bash","-lc"]
 CMD ["pytest -vv -s tests/auth tests/smoke/test_routes.py \
   --browser=chromium \
