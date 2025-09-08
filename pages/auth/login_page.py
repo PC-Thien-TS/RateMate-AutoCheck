@@ -67,6 +67,54 @@ class LoginPage:
         if last_err:
             raise last_err
 
+    def set_language(self, code: str, timeout_ms: int = 5_000) -> None:
+        """Best-effort language switcher.
+
+        Tries clicking visible language toggles; falls back to navigating to the
+        login path with the desired locale prefix (e.g., /en/... -> /vi/...).
+        """
+        code = (code or "").strip().lower()
+        # 1) Try common UI controls by label
+        rx = re.compile(r"(vi|tieng\s*viet|vietnamese)" if code == "vi" else r"(en|english)", re.I)
+        cand = self.page.get_by_role("button", name=rx).or_(
+            self.page.get_by_role("link", name=rx)
+        )
+        el = _first_visible(cand, timeout_ms=1_500)
+        if el:
+            with contextlib.suppress(Exception):
+                el.click(timeout=1_200)
+                self.page.wait_for_timeout(200)
+                return
+
+        # 2) Try href-based language links
+        sel = f"a[href*='/{code}/'], a[href^='/{code}/'], a[href$='/{code}']"
+        cand2 = self.page.locator(sel)
+        el2 = _first_visible(cand2, timeout_ms=1_200)
+        if el2:
+            with contextlib.suppress(Exception):
+                el2.click(timeout=1_200)
+                self.page.wait_for_timeout(200)
+                return
+
+        # 3) Fallback: navigate to login path with locale prefix
+        def _with_locale(path: str, locale: str) -> str:
+            p = (path or "/").strip()
+            if not p.startswith("/"):
+                p = "/" + p
+            if re.match(r"^/[a-z]{2}(/|$)", p):
+                return "/" + locale + p[3:]
+            if p.startswith(f"/{locale}/") or p == f"/{locale}":
+                return p
+            if p == "/":
+                return f"/{locale}"
+            return f"/{locale}{p}"
+
+        try:
+            target = f"{self.base_url}{_with_locale(self.login_path, code)}"
+            self.page.goto(target, wait_until="domcontentloaded", timeout=timeout_ms)
+        except Exception:
+            pass
+
     # ----- chuyển qua chế độ password (nếu có) -----
     def _switch_to_password_mode(self):
         with contextlib.suppress(Exception):
