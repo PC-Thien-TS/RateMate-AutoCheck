@@ -14,15 +14,30 @@ class ResponseLike:
     url: Optional[str] = None
     body: str = ""
 
-def _fill_force(locator: Locator, value: str, timeout_ms: int = 9000):
-    locator.wait_for(state="visible", timeout=timeout_ms)
-    with contextlib.suppress(Exception):
-        locator.click(timeout=timeout_ms)
-    with contextlib.suppress(Exception):
-        locator.fill("")
-    with contextlib.suppress(Exception):
-        locator.press("Control+A", timeout=800)
-    locator.type(value, delay=10)
+def _fill_force(locator, value, timeout=10000):
+    """
+    Điền giá trị vào input một cách ổn định:
+    - Ưu tiên .fill() (nhanh, ít rủi ro)
+    - Nếu vẫn lỗi (DOM đặc thù), fallback JS set value + dispatch sự kiện
+    """
+    locator.wait_for(state="visible", timeout=timeout)
+    try:
+        locator.click()
+        locator.fill("")  # clear
+        locator.fill(str(value), timeout=timeout)
+    except Exception:
+        locator.evaluate(
+            """(el, v) => {
+                el.focus();
+                el.value = '';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.value = String(v);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            str(value),
+        )
+
 
 def _is_inside_ion_searchbar(loc: Locator) -> bool:
     try:
