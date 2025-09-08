@@ -1,305 +1,90 @@
 name: E2E
 
 on:
-  schedule:
-    - cron: "0 0,8,16 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL to test"
+        required: false
+        default: "https://store.ratemate.top"
+      browsers:
+        description: "Browsers to run (comma-separated)"
+        required: false
+        default: "chromium,webkit"
+  push:
+    branches: [ main ]
+  pull_request:
 
 concurrency:
-  group: e2e
-  cancel-in-progress: false
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  run:
+  tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: RateMate-AutoCheck
     env:
-      SITE: ratemate
-      ENV: prod
-      BASE_URL_PROD: https://store.ratemate.top
-      LOGIN_PATH: /en/login
-      REGISTER_PATH: /en/login
-      JUNIT_XML: /app/report/junit.xml
-
-      PUBLIC_ROUTES: "/,/login"
-      PROTECTED_ROUTES: "/store,/product,/QR"
-      DISABLE_SITE_YAML: "1"
-
-      # Secrets cho auth
+      # URL/config with precedence: dispatch input -> repo variables -> secrets -> default
+      BASE_URL: ${{ inputs.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ vars.LOGIN_PATH || secrets.LOGIN_PATH || '/en/login' }}
+      REGISTER_PATH: ${{ vars.REGISTER_PATH || secrets.REGISTER_PATH || '/en/login' }}
+      # Credentials (optional; tests skip if missing)
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      # Runtime tuning
+      NAV_TIMEOUT_MS: "60000"
+      POST_LOGIN_PAUSE_MS: "800"
+      # JUnit output path for reporters
+      JUNIT_XML: report/junit.xml
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Build test image
-        run: docker build -t ratemate-tests .
-
-      - name: Run tests (Chromium, keepalive & timeout)
-        run: |
-          docker rm -f ratemate_e2e 2>/dev/null || true
-          set -e
-          (
-            while true; do
-              echo "[keepalive] $(date -u) running..."
-              sleep 30
-            done
-          ) & KPID=$!
-
-          set +e
-          timeout 25m docker run --name ratemate_e2e \
-            --ipc=host --shm-size=1g --user 0:0 \
-            -e SITE -e ENV \
-            -e BASE_URL_PROD \
-            -e BASE_URL="$BASE_URL_PROD" \
-            -e LOGIN_PATH -e REGISTER_PATH \
-            -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
-            -e E2E_EMAIL -e E2E_PASSWORD \
-            -e DISABLE_SITE_YAML \
-            -e JUNIT_XML \
-            -e CI=1 \
-            -e PWDEBUG=0 \
-            -e NODE_OPTIONS="--max-old-space-size=2048" \
-            -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=0 \
-            ratemate-tests \
-            bash -lc 'set -euo pipefail
-              mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
-              # ép nạp plugins để chắc chắn có các option --browser/--base-url
-              pytest -vv -s -p pytest_playwright -p pytest_base_url \
-                tests/auth tests/smoke/test_routes.py \
-                --browser=chromium \
-                --base-url="${BASE_URL}" \
-                -p no:pytest_excel \
-                -o cache_dir=/tmp/pytest_cache \
-                --output=/tmp/test-results \
-                --screenshot=only-on-failure --video=off --tracing=off \
-                -o junit_family=xunit2 --junitxml="${JUNIT_XML}" \
-                --html=/app/report/e2e.html --self-contained-html \
-                -o log_cli=true -o log_cli_level=INFO --durations=10 || true
-
-              # Fallback: luôn tạo junit & html nếu thiếu (bên trong container)
-              if [ ! -s "${JUNIT_XML}" ]; then
-                ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
-                printf "%s\n" "<?xml version=\"1.0\" encoding=\"utf-8\"?>" \
-                  "<testsuites><testsuite name=\"pytest\" tests=\"0\" failures=\"0\" errors=\"0\" skipped=\"0\" time=\"0\" timestamp=\"${ts}\" hostname=\"ci\"/></testsuites>" \
-                  > "${JUNIT_XML}"
-                echo "[fallback] wrote empty junit to ${JUNIT_XML}"
-              fi
-              h="/app/report/e2e.html"
-              if [ ! -s "${h}" ]; then
-                cat > "${h}" <<'EOF'
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>E2E report</title></head><body><h3>No report generated (or tests crashed)</h3></body></html>
-EOF
-                echo "[fallback] wrote stub html to ${h}"
-              fi
-            '
-          RC=$?
-
-          kill $KPID 2>/dev/null || true
-          wait $KPID 2>/dev/null || true
-
-          if [ "$RC" = "124" ]; then
-            echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
-          fi
-
-          exit 0
-
-      - name: Copy report out (and host fallback if missing)
-        if: always()
-        run: |
-          mkdir -p report
-          docker cp ratemate_e2e:/app/report/junit.xml  report/junit.xml  || true
-          docker cp ratemate_e2e:/app/report/e2e.html   report/e2e.html   || true
-          docker rm -f ratemate_e2e 2>/dev/null || true
-
-          if [ ! -s report/junit.xml ]; then
-            ts="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
-            printf "%s\n" "<?xml version=\"1.0\" encoding=\"utf-8\"?>" \
-              "<testsuites><testsuite name=\"pytest\" tests=\"0\" failures=\"0\" errors=\"0\" skipped=\"0\" time=\"0\" timestamp=\"${ts}\" hostname=\"host\"/></testsuites>" \
-              > report/junit.xml
-            echo "[host-fallback] wrote empty junit to report/junit.xml"
-          fi
-          if [ ! -s report/e2e.html ]; then
-            cat > report/e2e.html <<'EOF'
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>E2E report</title></head><body><h3>No report generated (or tests crashed)</h3></body></html>
-EOF
-            echo "[host-fallback] wrote stub html to report/e2e.html"
-          fi
-          echo "== ls report =="
-          ls -la report || true
-
-      - name: Parse JUnit → summary
-        if: always()
-        id: sum
-        run: |
-          python3 - <<'PY'
-          import os, json, glob, pathlib, xml.etree.ElementTree as ET
-          def find_ts(root):
-              return [root] if root.tag.endswith("testsuite") else list(root.findall(".//testsuite"))
-          out = {}
-          p = pathlib.Path("report/junit.xml")
-          if p.exists():
-              try:
-                  root = ET.parse(p).getroot()
-                  suites = find_ts(root)
-                  total = fail = error = skip = 0
-                  duration = 0.0
-                  fails = []
-                  for ts in suites:
-                      try: duration += float(ts.get("time","0") or 0)
-                      except: pass
-                      for tc in ts.findall(".//testcase"):
-                          total += 1
-                          fe = tc.find("failure"); er = tc.find("error"); sk = tc.find("skipped")
-                          if er is not None:
-                              error += 1
-                              name = f"{tc.get('classname','')}.{tc.get('name')}".strip(".")
-                              msg  = (er.get("message") or "").strip() or (er.text or "").strip()
-                              fails.append({"name": name, "reason": (msg or "No message")[:400]})
-                          elif fe is not None:
-                              fail += 1
-                              name = f"{tc.get('classname','')}.{tc.get('name')}".strip(".")
-                              msg  = (fe.get("message") or "").strip() or (fe.text or "").strip()
-                              fails.append({"name": name, "reason": (msg or "No message")[:400]})
-                          elif sk is not None:
-                              skip += 1
-                  out = {"total": total, "fail": fail, "error": error, "skip": skip,
-                         "duration": duration, "fails": fails}
-              except Exception:
-                  out = {}
-          val = json.dumps(out, ensure_ascii=False) if out else ""
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write(f"summary_json={val}\n")
-          PY
-
-      - name: List testcases (console & summary)
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import os, pathlib, xml.etree.ElementTree as ET
-          p = pathlib.Path("report/junit.xml")
-          if not p.exists():
-            print("No junit.xml to list."); raise SystemExit(0)
-          root = ET.parse(p).getroot()
-          suites = [root] if root.tag.endswith("testsuite") else list(root.findall(".//testsuite"))
-          if not suites:
-            print("No <testsuite> in junit.xml."); raise SystemExit(0)
-          passed, failed, errored, skipped = [], [], [], []
-          for ts in suites:
-            for tc in ts.findall(".//testcase"):
-              name = f"{tc.get('classname','')}.{tc.get('name')}".strip(".")
-              try: t = float(tc.get('time','0') or 0)
-              except: t = 0.0
-              if tc.find('skipped') is not None: skipped.append((name, t))
-              elif tc.find('failure') is not None: failed.append((name, t))
-              elif tc.find('error') is not None: errored.append((name, t))
-              else: passed.append((name, t))
-          def fmt(rows): return "\n".join(f"• {n} [{t:.2f}s]" for n,t in rows) or "(none)"
-          print("\n=== PASSED ===");  print(fmt(passed))
-          print("\n=== FAILED ===");  print(fmt(failed))
-          print("\n=== ERRORED ==="); print(fmt(errored))
-          print("\n=== SKIPPED ==="); print(fmt(skipped))
-          summ = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summ:
-            with open(summ, "a", encoding="utf-8") as fh:
-              fh.write("## Testcases\n\n")
-              def md(rows, title):
-                fh.write(f"### {title}\n\n")
-                if rows:
-                  fh.write("| Testcase | Time (s) |\n|---|---:|\n")
-                  for n,t in rows[:100]:
-                    fh.write(f"| `{n}` | {t:.2f} |\n")
-                else:
-                  fh.write("_(none)_\n")
-                fh.write("\n")
-              md(passed,  "Passed")
-              md(failed,  "Failed")
-              md(errored, "Errored")
-              md(skipped, "Skipped")
-          PY
-
-      - name: Setup Python for notification
-        if: always()
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install notify deps
-        if: always()
+      - name: Install Python dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          pip install requests
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Send Telegram (message via Python)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
-          SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
-          JUNIT_XML:          report/junit.xml
-          TELEGRAM_MESSAGE_PREFIX: ''
+      - name: Install Playwright browsers
         run: |
-          python3 Ci/report_telegram.py
+          python -m playwright install --with-deps chromium webkit
 
-      - name: Send Telegram (attach HTML report)
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
+      - name: Run tests (chromium + webkit)
         run: |
-          python3 - <<'PY'
-          import os, requests, os.path
+          mkdir -p report test-results
+          pytest -vv tests \
+            --browser=chromium --browser=webkit \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --junitxml=${{ env.JUNIT_XML }}
 
-          def build_proxies():
-              px = os.getenv("TELEGRAM_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-              if px and not (px.startswith("http://") or px.startswith("https://") or px.startswith("socks")):
-                  px = "http://" + px
-              return {"http": px, "https": px} if px else None
-
-          tok  = os.environ["TELEGRAM_BOT_TOKEN"]
-          chat = os.environ["TELEGRAM_CHAT_ID"]
-          path = "report/e2e.html"
-          if not os.path.isfile(path):
-              print("No HTML report to attach."); raise SystemExit(0)
-
-          with open(path, "rb") as f:
-              files = {"document": ("e2e.html", f, "text/html")}
-              data  = {"chat_id": chat, "caption": "E2E report"}
-
-              # 1) Thử gửi qua proxy (nếu có)
-              try:
-                  print("[telegram] sending document with proxy (if set)...")
-                  r = requests.post(
-                      f"https://api.telegram.org/bot{tok}/sendDocument",
-                      data=data, files=files, timeout=60, proxies=build_proxies()
-                  )
-                  r.raise_for_status()
-                  print("Telegram document sent (proxy).")
-              except Exception as e:
-                  # 2) Retry direct: vô hiệu ENV proxy
-                  try:
-                      print(f"[telegram] proxy failed: {e}; retrying direct without env proxies...")
-                      f.seek(0)  # reopen buffer
-                      s = requests.Session()
-                      s.trust_env = False     # <-- không đọc HTTP(S)_PROXY từ env
-                      r = s.post(
-                          f"https://api.telegram.org/bot{tok}/sendDocument",
-                          data=data, files=files, timeout=60, proxies={}
-                      )
-                      r.raise_for_status()
-                      print("Telegram document sent (direct).")
-                  except Exception as e2:
-                      # Không làm fail workflow
-                      print(f"[telegram] direct failed: {e2}; skip attaching HTML.")
-                      raise SystemExit(0)
-          PY
-
-      - name: Upload HTML report
+      - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-report
-          path: report/
+          name: e2e-artifacts-${{ github.run_number }}
+          path: |
+            RateMate-AutoCheck/report/**
+            RateMate-AutoCheck/test-results/**
+          if-no-files-found: warn
+
+      - name: Telegram report (optional)
+        if: always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PROXY: ${{ secrets.TELEGRAM_PROXY }}
+          TELEGRAM_MESSAGE_PREFIX: "E2E"
+        run: |
+          python Ci/report_telegram.py
+
