@@ -21,11 +21,9 @@ jobs:
       LOGIN_PATH: /en/login
       REGISTER_PATH: /en/login
       JUNIT_XML: /app/report/junit.xml
-
       PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
       DISABLE_SITE_YAML: "1"
-
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
@@ -35,17 +33,11 @@ jobs:
       - name: Build test image
         run: docker build -t ratemate-tests .
 
-      - name: Run tests (Chromium, keepalive nhẹ)
+      - name: Run tests (Chromium)
         run: |
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
-          (
-            while true; do
-              printf '.'
-              sleep 120
-            done
-          ) &
-          KPID=$!
+          ( while true; do printf '.'; sleep 120; done ) & KPID=$$
 
           set +e
           timeout 25m docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
@@ -133,8 +125,7 @@ jobs:
           TELEGRAM_PROXY:     ${{ secrets.TELEGRAM_PROXY }}
           SUMMARY_JSON:       ${{ steps.sum.outputs.summary_json }}
           JUNIT_XML:          report/junit.xml
-        run: |
-          python Ci/report_telegram.py
+        run: python Ci/report_telegram.py
 
       - name: Send Telegram (attach HTML report)
         if: always()
@@ -149,14 +140,12 @@ jobs:
           if px and not (px.startswith("http") or px.startswith("socks")):
               px = "http://" + px
           proxies = {"http": px, "https": px} if px else None
-
           tok = os.environ["TELEGRAM_BOT_TOKEN"]
           chat = os.environ["TELEGRAM_CHAT_ID"]
           path = "report/e2e.html"
           if not os.path.isfile(path):
               print("No HTML report to attach.")
               raise SystemExit(0)
-
           with open(path, "rb") as f:
               files = {"document": ("e2e.html", f, "text/html")}
               data  = {"chat_id": chat, "caption": "E2E report"}

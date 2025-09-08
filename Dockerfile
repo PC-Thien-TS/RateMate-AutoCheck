@@ -1,4 +1,4 @@
-# Playwright image đã kèm browsers, phiên bản ổn định (1.46.1)
+# Image có sẵn browsers, ổn định hơn (1.46.1)
 FROM mcr.microsoft.com/playwright/python:v1.46.1-jammy
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -12,17 +12,12 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 
 WORKDIR /app
 
-# Cài deps Python (đã ghim version khớp image)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Thư mục báo cáo
 RUN mkdir -p /app/report /tmp/pytest_cache /tmp/test-results
-
-# Copy source
 COPY . /app
 
-# Chạy root để dễ docker cp báo cáo
 USER root
 
 ENTRYPOINT ["bash","-lc"]
