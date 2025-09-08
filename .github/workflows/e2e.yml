@@ -58,6 +58,17 @@ jobs:
             exit 1
           fi
 
+      - name: Sanitize pytest.ini (dedupe addopts)
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          if [ -f pytest.ini ]; then
+            n=$(grep -cE '^addopts\s*=' pytest.ini || true)
+            if [ "$n" -gt 1 ]; then
+              echo "Sanitizing duplicate addopts in pytest.ini"
+              awk 'BEGIN{seen=0} {if($0 ~ /^addopts\s*=/){ if(seen==0){print; seen=1} } else {print}}' pytest.ini > pytest.ini.san && mv pytest.ini.san pytest.ini
+            fi
+          fi
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
