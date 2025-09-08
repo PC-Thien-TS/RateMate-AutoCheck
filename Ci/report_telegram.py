@@ -295,14 +295,16 @@ def _send_text(text):
                 sent += 1
             except Exception as e:
                 print(f"[telegram] Proxy send failed for chunk {idx}: {e}")
-                print("[telegram] Retrying direct...")
-                r = requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    data=data, timeout=60
-                )
-                r.raise_for_status()
-                print(f"[telegram] Chunk {idx} sent successfully")
-                sent += 1
+                print("[telegram] Retrying direct (without proxy)...")
+                with requests.Session() as s:
+                    s.trust_env = False # Vô hiệu hóa proxy từ môi trường cho request này
+                    r = s.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        data=data, timeout=60, proxies={}
+                    )
+                    r.raise_for_status()
+                    print(f"[telegram] Chunk {idx} sent successfully via direct connection.")
+                    sent += 1
         print(f"Telegram sent OK to {chat} ({sent}/{len(parts)} chunks).")
 
 def main():
