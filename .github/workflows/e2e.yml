@@ -24,9 +24,9 @@ jobs:
 
       PUBLIC_ROUTES: "/,/login"
       PROTECTED_ROUTES: "/store,/product,/QR"
-
       DISABLE_SITE_YAML: "1"
 
+      # Secrets cho auth
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
 
@@ -41,16 +41,18 @@ jobs:
           docker rm -f ratemate_e2e 2>/dev/null || true
           set -e
 
+          # keepalive để tránh GH cắt vì im lặng
           (
             while true; do
               echo "[keepalive] $(date -u) running..."
               sleep 30
             done
           ) &
-          KPID=$$
+          KPID=$!
 
           set +e
-          timeout 25m docker run --name ratemate_e2e -t --ipc=host --shm-size=1g --user 0:0 \
+          timeout 25m docker run --name ratemate_e2e \
+            --ipc=host --shm-size=1g --user 0:0 \
             -e SITE -e ENV \
             -e BASE_URL_PROD \
             -e BASE_URL="$BASE_URL_PROD" \
@@ -58,16 +60,21 @@ jobs:
             -e PUBLIC_ROUTES -e PROTECTED_ROUTES \
             -e E2E_EMAIL -e E2E_PASSWORD \
             -e DISABLE_SITE_YAML \
+            -e JUNIT_XML \
+            -e CI=1 \
+            -e PWDEBUG=0 \
+            -e NODE_OPTIONS="--max-old-space-size=2048" \
             ratemate-tests \
-            bash -lc 'set -e
+            bash -lc 'set -euo pipefail
               mkdir -p /tmp/pytest_cache /tmp/test-results /app/report
               pytest -vv -s tests/auth tests/smoke/test_routes.py \
                 --browser=chromium \
+                --base-url="$BASE_URL" \
                 -p no:pytest_excel \
                 -o cache_dir=/tmp/pytest_cache \
                 --output=/tmp/test-results \
                 --screenshot=only-on-failure --video=off --tracing=off \
-                -o junit_family=xunit2 --junitxml=$JUNIT_XML \
+                -o junit_family=xunit2 --junitxml="$JUNIT_XML" \
                 --html=/app/report/e2e.html --self-contained-html \
                 -o log_cli=true -o log_cli_level=INFO --durations=10 || true
             '
@@ -80,6 +87,7 @@ jobs:
             echo "::warning::Tests hit timeout (25m); continuing to copy reports..."
           fi
 
+          # luôn tiếp tục để còn copy báo cáo
           exit 0
 
       - name: Copy report out
