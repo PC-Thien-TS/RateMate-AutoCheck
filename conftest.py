@@ -159,3 +159,12 @@ def locale(locales) -> str:
     except Exception:
         pass
     return "en"
+
+
+# Combined route cases for parametrized smoke tests (alternative to inline CASES)
+@pytest.fixture(scope="session")
+def all_routes(public_routes, protected_routes):
+    return (
+        [{"kind": "public", "path": p} for p in public_routes]
+        + [{"kind": "protected", "path": p} for p in protected_routes]
+    )
