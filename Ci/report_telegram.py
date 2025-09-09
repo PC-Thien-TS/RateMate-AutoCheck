@@ -197,22 +197,24 @@ def _build_header(summary):
 
     head.append(f"{status} E2E Result: {total} tests | pass={passed} fail={fail} error={error} skip={skip}")
     head.append(f"Duration: {_fmt_duration(dur)}")
-    ctx = []
-    if site: ctx.append(f"SITE={site}")
-    if env: ctx.append(f"ENV={env}")
-    if base_url: ctx.append(f"BASE={base_url}")
-    if ref: ctx.append(f"BRANCH={ref}")
-    if short_sha: ctx.append(f"SHA={short_sha}")
-    if ctx:
-        head.append(" · ".join(ctx))
-    if run_url:
-        head.append(f"Run: {run_url}")
-    if commit_url and short_sha:
-        head.append(f"Commit: {commit_url}")
+    privacy = _bool_env("TELEGRAM_PRIVACY", False) or _bool_env("TELEGRAM_COMPACT", False)
+    if not privacy:
+        ctx = []
+        if site: ctx.append(f"SITE={site}")
+        if env: ctx.append(f"ENV={env}")
+        if base_url: ctx.append(f"BASE={base_url}")
+        if ref: ctx.append(f"BRANCH={ref}")
+        if short_sha: ctx.append(f"SHA={short_sha}")
+        if ctx:
+            head.append(" · ".join(ctx))
+        if run_url:
+            head.append(f"Run: {run_url}")
+        if commit_url and short_sha:
+            head.append(f"Commit: {commit_url}")
 
-    junit_src = summary.get("_junit_src")
-    if junit_src:
-        head.append(f"JUnit source: {junit_src}")
+        junit_src = summary.get("_junit_src")
+        if junit_src:
+            head.append(f"JUnit source: {junit_src}")
 
     if total == 0:
         head.append("No testcases detected — JUnit missing/empty or tests crashed before reporting.")
@@ -374,55 +376,61 @@ def _build_message(summary):
     ]
 
     # Short context line
+    show_context = _bool_env("TELEGRAM_SHOW_CONTEXT", True)
     suites = _fmt_suite_counts(summary)
     browsers = _browsers_used(summary)
-    ctx_line = " | ".join([p for p in (f"Browsers: {browsers}" if browsers else "", suites) if p])
-    if ctx_line:
-        blocks += [ctx_line]
+    if show_context:
+        ctx_line = " | ".join([p for p in (f"Browsers: {browsers}" if browsers else "", suites) if p])
+        if ctx_line:
+            blocks += [ctx_line]
 
     # Quick totals line
     blocks += [f"Totals: pass={passed_n} fail={fail_n} error={error_n} skip={skip_n}"]
 
     # Problems first
-    if fail_details:
-        lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in fail_details[:list_limit]]
-        more = max(len(fail_details) - min(len(fail_details), list_limit), 0)
-        if more:
-            lines.append(f"(+{more} more)")
-        blocks += ["", "❌ Failed:", "\n".join(lines)]
-    elif failed:
-        blocks += ["", "❌ Failed:", _bullets_limited(failed, list_limit, _pretty_test_id)]
-
-    if error_details:
-        lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in error_details[:list_limit]]
-        more = max(len(error_details) - min(len(error_details), list_limit), 0)
-        if more:
-            lines.append(f"(+{more} more)")
-        blocks += ["", "💥 Errors:", "\n".join(lines)]
-    elif errored:
-        blocks += ["", "💥 Errors:", _bullets_limited(errored, list_limit, _pretty_test_id)]
-
-    # Skipped (optional)
-    if skip_n and show_skipped:
-        if skipped_details:
-            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in skipped_details[:list_limit]]
-            more = max(len(skipped_details) - min(len(skipped_details), list_limit), 0)
+    privacy = _bool_env("TELEGRAM_PRIVACY", False) or _bool_env("TELEGRAM_COMPACT", False)
+    if not privacy:
+        if fail_details:
+            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in fail_details[:list_limit]]
+            more = max(len(fail_details) - min(len(fail_details), list_limit), 0)
             if more:
                 lines.append(f"(+{more} more)")
-            blocks += ["", "⚠️ Skipped:", "\n".join(lines)]
-        else:
-            blocks += ["", "⚠️ Skipped:", _bullets_limited(skipped, list_limit, _pretty_test_id)]
+            blocks += ["", "❌ Failed:", "\n".join(lines)]
+        elif failed:
+            blocks += ["", "❌ Failed:", _bullets_limited(failed, list_limit, _pretty_test_id)]
 
-    # Passed (show only if requested or short list)
-    if passed and (show_passed or len(passed) <= list_limit):
-        blocks += ["", f"✅ Passed (top {list_limit}):", _bullets_limited(passed, list_limit, _pretty_test_id)]
+        if error_details:
+            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in error_details[:list_limit]]
+            more = max(len(error_details) - min(len(error_details), list_limit), 0)
+            if more:
+                lines.append(f"(+{more} more)")
+            blocks += ["", "💥 Errors:", "\n".join(lines)]
+        elif errored:
+            blocks += ["", "💥 Errors:", _bullets_limited(errored, list_limit, _pretty_test_id)]
+
+        # Skipped (optional)
+        if skip_n and show_skipped:
+            if skipped_details:
+                lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in skipped_details[:list_limit]]
+                more = max(len(skipped_details) - min(len(skipped_details), list_limit), 0)
+                if more:
+                    lines.append(f"(+{more} more)")
+                blocks += ["", "⚠️ Skipped:", "\n".join(lines)]
+            else:
+                blocks += ["", "⚠️ Skipped:", _bullets_limited(skipped, list_limit, _pretty_test_id)]
+
+        # Passed (show only if requested or short list)
+        if passed and (show_passed or len(passed) <= list_limit):
+            blocks += ["", f"✅ Passed (top {list_limit}):", _bullets_limited(passed, list_limit, _pretty_test_id)]
 
     # Breakdown + slowest
+    show_breakdown = _bool_env("TELEGRAM_SHOW_BREAKDOWN", True)
     br = _build_browser_breakdown(summary)
-    if br:
+    if br and show_breakdown:
         blocks += ["", br]
     slow = summary.get("slow") or []
-    if slow:
+    # Hide slowest details in privacy/compact mode
+    if slow and not ( _bool_env("TELEGRAM_PRIVACY", False) or _bool_env("TELEGRAM_COMPACT", False) ):
         blocks += [
             "",
             "Slowest tests (top 5):",
