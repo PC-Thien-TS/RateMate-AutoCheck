@@ -428,6 +428,25 @@ def _build_message(summary):
             "Slowest tests (top 5):",
         ] + [f"- {_pretty_test_id(full)} — {_fmt_duration(t)}" for t, full in slow[:5]]
 
+    # Zero-tests diagnostics to guide debugging
+    if total == 0:
+        try:
+            import glob, pathlib
+            has_tests_dir = pathlib.Path("tests").is_dir()
+            test_files = glob.glob("tests/**/*.py", recursive=True)
+            tests_count = len(test_files)
+        except Exception:
+            has_tests_dir, tests_count = False, 0
+
+        run_login_success = (os.getenv("RUN_LOGIN_SUCCESS") or "").strip()
+        creds_present = bool(os.getenv("E2E_EMAIL")) and bool(os.getenv("E2E_PASSWORD"))
+        blocks += [
+            "",
+            "Diagnostics:",
+            f"- tests/ present: {'yes' if has_tests_dir else 'no'} (py files: {tests_count})",
+            f"- RUN_LOGIN_SUCCESS: {run_login_success or 'unset'}; creds: {'yes' if creds_present else 'no'}",
+        ]
+
     return "\n".join([b for b in blocks if str(b).strip() != ""]).strip()
 
 # ---------- telegram ----------
