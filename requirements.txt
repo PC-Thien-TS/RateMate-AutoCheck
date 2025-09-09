@@ -1,0 +1,22 @@
+# Core test stack
+pytest==8.3.3
+pytest-xdist==3.6.1
+pytest-rerunfailures==13.0
+pytest-metadata==3.1.1
+pytest-html==4.1.1
+pytest-base-url==2.1.0
+
+# Playwright (khớp image v1.47.0-jammy)
+playwright==1.55.0
+pytest-playwright==0.5.0
+
+# Optional plugin (đang disable trong CI bằng -p no:pytest_excel)
+pytest-excel==1.7.0
+openpyxl==3.1.5
+
+# YAML & env
+PyYAML==6.0.1
+python-dotenv==1.0.1
+
+# Telegram sender
+requests==2.32.5

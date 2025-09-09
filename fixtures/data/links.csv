@@ -1,0 +1,5 @@
+path,requires_auth
+/en/login,
+/en/store,true
+/en/product,true
+/en/QR,true

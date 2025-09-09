@@ -1,0 +1,14 @@
+# sites.yaml
+default_site: ratemate
+
+sites:
+  ratemate:
+    base_url: "https://store.ratemate.top"
+    login_path: "/en/login"
+    register_path: "/en/register"   # nếu form đăng ký chung trang login, đổi lại "/en/login"
+    locales: ["en"]                  # thêm "vi" nếu site đã bật tiếng Việt
+    routes:
+      - "/en/login"
+      - "/en/store"
+      - "/en/product"
+      - "/en/QR"

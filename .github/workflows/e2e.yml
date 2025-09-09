@@ -1,0 +1,141 @@
+name: E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL to test"
+        required: false
+        default: "https://store.ratemate.top"
+      browsers:
+        description: "Browsers to run (comma-separated)"
+        required: false
+        default: "chromium,webkit"
+      run_login_success:
+        description: "Run login_success test (true/false)"
+        required: false
+        default: "false"
+  push:
+    branches: [ main ]
+  pull_request:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      # URL/config with precedence: dispatch input -> repo variables -> secrets -> default
+      BASE_URL: ${{ inputs.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ vars.LOGIN_PATH || secrets.LOGIN_PATH || '/en/login' }}
+      ALT_LOGIN_PATH: ${{ vars.ALT_LOGIN_PATH || secrets.ALT_LOGIN_PATH || '/login' }}
+      REGISTER_PATH: ${{ vars.REGISTER_PATH || secrets.REGISTER_PATH || '/en/login' }}
+      # Credentials (optional; tests skip if missing)
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      # Runtime tuning
+      NAV_TIMEOUT_MS: "60000"
+      POST_LOGIN_PAUSE_MS: "800"
+      # JUnit output path for reporters
+      JUNIT_XML: report/junit.xml
+      # Control login_success execution in CI
+      RUN_LOGIN_SUCCESS: ${{ inputs.run_login_success || vars.RUN_LOGIN_SUCCESS || 'false' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine project directory
+        id: detect
+        run: |
+          if [ -f "requirements.txt" ] && [ -d "tests" ]; then
+            echo "WORKDIR=." >> $GITHUB_ENV
+            echo "Detected project at repo root"
+          elif [ -d "RateMate-AutoCheck" ]; then
+            echo "WORKDIR=RateMate-AutoCheck" >> $GITHUB_ENV
+            echo "Detected project at RateMate-AutoCheck/"
+          else
+            echo "Project directory not found (requirements.txt/tests missing)." >&2
+            ls -la
+            exit 1
+          fi
+
+      - name: Sanitize pytest.ini (dedupe addopts)
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          if [ -f pytest.ini ]; then
+            n=$(grep -cE '^addopts\s*=' pytest.ini || true)
+            if [ "$n" -gt 1 ]; then
+              echo "Sanitizing duplicate addopts in pytest.ini"
+              awk 'BEGIN{seen=0} {if($0 ~ /^addopts\s*=/){ if(seen==0){print; seen=1} } else {print}}' pytest.ini > pytest.ini.san && mv pytest.ini.san pytest.ini
+            fi
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          python -m playwright install --with-deps chromium webkit
+
+      - name: Run tests (chromium + webkit)
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          mkdir -p report test-results
+          EXTRA=""
+          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then
+            EXTRA="not test_login_success"
+          fi
+          if [ -z "${E2E_EMAIL}" ] || [ -z "${E2E_PASSWORD}" ]; then
+            # No credentials -> skip login_success even if requested
+            EXTRA="not test_login_success"
+          fi
+          echo "Pytest extra filter: ${EXTRA}"
+          if [ -n "${EXTRA}" ]; then
+            PYTEST_K_ARGS=( -k "${EXTRA}" )
+          else
+            PYTEST_K_ARGS=()
+          fi
+          pytest -vv tests "${PYTEST_K_ARGS[@]}" \
+            --browser=chromium --browser=webkit \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --junitxml=${{ env.JUNIT_XML }}
+
+      - name: Upload test artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ github.run_number }}
+          path: |
+            ${{ env.WORKDIR }}/report/**
+            ${{ env.WORKDIR }}/test-results/**
+          if-no-files-found: warn
+
+      - name: Telegram report (optional)
+        if: ${{ always() }}
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PROXY: ${{ secrets.TELEGRAM_PROXY }}
+          TELEGRAM_MESSAGE_PREFIX: "E2E"
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+            echo "Skipping Telegram: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set";
+            exit 0;
+          fi
+          python Ci/report_telegram.py
