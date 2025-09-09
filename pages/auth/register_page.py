@@ -30,6 +30,9 @@ _ERROR_SELECTOR = (
     ".el-message__content, .v-alert__content, .toast-message, .notification-message"
 )
 
+# Broad pattern to catch typical register endpoints
+_REGISTER_API_PATTERN = re.compile(r"/(auth|register|sign|user|account)", re.I)
+
 def _pick_visible(raw: Locator, timeout_ms: int = 8000) -> Locator:
     """
     Chọn phần tử đầu tiên "visible" trong nhóm. Đợi tối đa timeout_ms.
