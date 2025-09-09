@@ -1,0 +1,107 @@
+image: mcr.microsoft.com/playwright/python:v1.55.0-jammy
+
+options:
+  max-time: 40
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: Smoke E2E (PR)
+          caches:
+            - pip
+          size: 2x
+          script:
+            - cd ai_qc
+            - python -m pip install --upgrade pip
+            - pip install -r requirements.txt
+            # Browsers are preinstalled in this image; install deps just in case
+            - python -m playwright --version
+            - mkdir -p report test-results
+            # Env for site under test (adjust via Repository variables if needed)
+            - export BASE_URL=${BASE_URL:-"https://store.ratemate.top"}
+            - export LOGIN_PATH=${LOGIN_PATH:-"/en/login"}
+            - export REGISTER_PATH=${REGISTER_PATH:-"/en/login"}
+            - export PUBLIC_ROUTES=${PUBLIC_ROUTES:-"/en/login"}
+            - export PROTECTED_ROUTES=${PROTECTED_ROUTES:-"/en/store,/en/product,/en/QR"}
+            - echo "BASE_URL=$BASE_URL" && echo "PUBLIC_ROUTES=$PUBLIC_ROUTES" && echo "PROTECTED_ROUTES=$PROTECTED_ROUTES"
+            # Smoke set (chromium + webkit)
+            - pytest -vv tests/auth tests/smoke/test_routes.py \
+                --browser=chromium --browser=webkit \
+                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+                --junitxml=report/junit.xml
+          artifacts:
+            - ai_qc/report/**
+            - ai_qc/test-results/**
+
+  branches:
+    develop:
+      - step:
+          name: Full E2E (Develop)
+          caches:
+            - pip
+          size: 2x
+          script:
+            - cd ai_qc
+            - python -m pip install --upgrade pip
+            - pip install -r requirements.txt
+            - python -m playwright --version
+            - mkdir -p report test-results
+            - export BASE_URL=${BASE_URL:-"https://store.ratemate.top"}
+            - export LOGIN_PATH=${LOGIN_PATH:-"/en/login"}
+            - export REGISTER_PATH=${REGISTER_PATH:-"/en/login"}
+            - export PUBLIC_ROUTES=${PUBLIC_ROUTES:-"/en/login"}
+            - export PROTECTED_ROUTES=${PROTECTED_ROUTES:-"/en/store,/en/product,/en/QR"}
+            - pytest -vv tests \
+                --browser=chromium --browser=firefox --browser=webkit \
+                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+                --junitxml=report/junit.xml
+          artifacts:
+            - ai_qc/report/**
+            - ai_qc/test-results/**
+
+    main:
+      - step:
+          name: Full E2E (Main)
+          caches:
+            - pip
+          size: 2x
+          script:
+            - cd ai_qc
+            - python -m pip install --upgrade pip
+            - pip install -r requirements.txt
+            - python -m playwright --version
+            - mkdir -p report test-results
+            - export BASE_URL=${BASE_URL:-"https://store.ratemate.top"}
+            - export LOGIN_PATH=${LOGIN_PATH:-"/en/login"}
+            - export REGISTER_PATH=${REGISTER_PATH:-"/en/login"}
+            - export PUBLIC_ROUTES=${PUBLIC_ROUTES:-"/en/login"}
+            - export PROTECTED_ROUTES=${PROTECTED_ROUTES:-"/en/store,/en/product,/en/QR"}
+            - pytest -vv tests \
+                --browser=chromium --browser=firefox --browser=webkit \
+                --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+                --junitxml=report/junit.xml
+          artifacts:
+            - ai_qc/report/**
+            - ai_qc/test-results/**
+      - step:
+          name: Notify Telegram (manual)
+          trigger: manual
+          script:
+            - cd ai_qc
+            # Map Bitbucket env to GitHub-like vars used by the script
+            - export GITHUB_SERVER_URL="https://bitbucket.org"
+            - export GITHUB_REPOSITORY="${BITBUCKET_REPO_FULL_NAME}"
+            - export GITHUB_RUN_ID="${BITBUCKET_BUILD_NUMBER}"
+            - export GITHUB_REF_NAME="${BITBUCKET_TAG:-$BITBUCKET_BRANCH}"
+            - export GITHUB_SHA="${BITBUCKET_COMMIT}"
+            - export JUNIT_XML="report/junit.xml"
+            # Telegram tokens must be configured in Repository variables
+            - python Ci/report_telegram.py
+          artifacts:
+            - ai_qc/report/**
+
+definitions:
+  caches:
+    pip: ~/.cache/pip
+
