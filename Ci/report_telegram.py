@@ -76,6 +76,7 @@ def _parse_junit_any(path):
 
     per_browser = {b: {"total": 0, "fail": 0, "error": 0, "skip": 0} for b in ("chromium","firefox","webkit")}
     fails, passed, errored, skipped = [], [], [], []
+    fail_details, error_details, skipped_details = [], [], []
     total = fail = error = skip = 0
     duration_sum = 0.0
     slow = []
@@ -106,19 +107,25 @@ def _parse_junit_any(path):
                 status = "error"
                 error += 1
                 msg  = (er.get("message") or "").strip() or (er.text or "").strip() or "No message"
+                # legacy combined list
                 fails.append({"name": full_name, "reason": msg[:400]})
+                # detailed bucket
+                error_details.append({"name": full_name, "reason": msg[:400]})
                 errored.append((full_name, ttime))
             elif fe is not None:
                 status = "fail"
                 fail += 1
                 msg  = (fe.get("message") or "").strip() or (fe.text or "").strip() or "No message"
                 fails.append({"name": full_name, "reason": msg[:400]})
+                fail_details.append({"name": full_name, "reason": msg[:400]})
                 passed  # just to keep linter happy
                 # Note: fail list already captured; also track in failed bucket
             elif sk is not None:
                 status = "skip"
                 skip += 1
+                msg  = (sk.get("message") or "").strip() or (sk.text or "").strip() or ""
                 skipped.append((full_name, ttime))
+                skipped_details.append({"name": full_name, "reason": msg[:400]})
             else:
                 passed.append((full_name, ttime))
 
@@ -140,6 +147,7 @@ def _parse_junit_any(path):
         "duration": duration_sum,
         "fails": fails, "per_browser": per_browser, "slow": slow[:5],
         "passed": passed, "failed": [(f["name"], 0.0) for f in fails], "errored": errored, "skipped": skipped,
+        "fail_details": fail_details, "error_details": error_details, "skipped_details": skipped_details,
         "_junit_src": str(p),
     }
 
@@ -229,38 +237,196 @@ def _build_browser_breakdown(summary):
             lines.append(f"- {b}: {t} | pass={p} fail={f} error={e} skip={s}")
     return "\n".join(lines)
 
+
+def _list_limit_from_env(var_name: str, default: int = 20) -> int:
+    try:
+        v = int(os.getenv(var_name, str(default)) or default)
+        return v if v > 0 else default
+    except Exception:
+        return default
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _suite_key(test_name: str) -> str:
+    # tests.auth.test_login.test_login_success[chromium] -> auth
+    base = (test_name or "").split("[", 1)[0]
+    parts = base.split(".")
+    return parts[1] if len(parts) > 1 and parts[0] == "tests" else (parts[0] if parts else "")
+
+
+def _collect_suite_counts(summary):
+    buckets = {}
+    def _add(name: str):
+        k = _suite_key(name)
+        if not k:
+            return
+        buckets[k] = buckets.get(k, 0) + 1
+
+    for lst_name in ("passed", "failed", "errored", "skipped"):
+        for item in summary.get(lst_name) or []:
+            try:
+                name = item[0] if isinstance(item, (list, tuple)) else item.get("name")
+            except Exception:
+                name = None
+            if name:
+                _add(name)
+    return buckets
+
+
+def _fmt_suite_counts(summary):
+    buckets = _collect_suite_counts(summary)
+    if not buckets:
+        return ""
+    # stable order: auth, smoke, i18n, then others
+    order = ["auth", "smoke", "i18n"] + sorted([k for k in buckets.keys() if k not in {"auth","smoke","i18n"}])
+    parts = [f"{k.capitalize()}({buckets[k]})" for k in order if k in buckets]
+    return "Suites: " + ", ".join(parts)
+
+
+def _browsers_used(summary):
+    per = summary.get("per_browser") or {}
+    used = [b for b in ("chromium","firefox","webkit") if per.get(b, {}).get("total", 0) > 0]
+    return ", ".join(used)
+
+
+def _bullets_limited(rows, limit=20, transform=None):
+    if not rows:
+        return "(none)"
+    shown = rows[:limit]
+    def _name_of(x):
+        if isinstance(x, (tuple, list)):
+            return x[0]
+        if isinstance(x, dict):
+            return x.get("name", "")
+        return str(x)
+    lines = []
+    for it in shown:
+        label = transform(_name_of(it)) if transform else _name_of(it)
+        lines.append(f"• {label}")
+    more = max(len(rows) - len(shown), 0)
+    if more > 0:
+        lines.append(f"(+{more} more)")
+    return "\n".join(lines)
+
+
+def _pretty_test_id(name: str) -> str:
+    """Make pytest nodeid more readable.
+
+    examples:
+      tests.auth.test_login.test_login_success[chromium] -> auth/test_login::test_login_success [chromium]
+      tests.smoke.test_links.test_open_links_ok[chromium-/en/login] -> smoke/test_links::test_open_links_ok [/en/login] (chromium)
+    """
+    if not name:
+        return name
+    base, br = (name.split("[", 1) + [""])[:2]
+    br = br.rstrip("]") if br else ""
+    parts = base.split(".")
+    if parts and parts[0] == "tests":
+        parts = parts[1:]
+    mod = "/".join(parts[:-1]) if len(parts) > 1 else base
+    fn = parts[-1] if parts else base
+    browser = None
+    param = None
+    if br:
+        # browser may be first token before '-' in bracket
+        if "-" in br:
+            browser, param = br.split("-", 1)
+        else:
+            browser, param = br, None
+    tail = []
+    if param:
+        tail.append(f"[{param}]")
+    if browser:
+        tail.append(f"({browser})")
+    suffix = (" "+" ".join(tail)) if tail else ""
+    return f"{mod}::{fn}{suffix}"
+
 def _build_message(summary):
     total = int(summary.get("total", 0))
-    passed_n = max(total - int(summary.get("fail",0)) - int(summary.get("error",0)) - int(summary.get("skip",0)), 0)
+    fail_n = int(summary.get("fail", 0))
+    error_n = int(summary.get("error", 0))
+    skip_n = int(summary.get("skip", 0))
+    passed_n = max(total - fail_n - error_n - skip_n, 0)
 
-    blocks = [
-        _build_header(summary),
-        "",
-        f"Passed: {passed_n} case(s)",
-    ]
+    # Controls
+    list_limit = _list_limit_from_env("TELEGRAM_LIST_LIMIT", 20)
+    show_passed = _bool_env("TELEGRAM_SHOW_PASSED", False)
+    show_skipped = _bool_env("TELEGRAM_SHOW_SKIPPED", True)
 
-    # liệt kê tên test
     passed  = summary.get("passed")  or []
     failed  = summary.get("failed")  or []
     errored = summary.get("errored") or []
     skipped = summary.get("skipped") or []
 
-    if passed:
-        blocks += ["", "✅ Passed (top 20):", _bullets(passed, 20)]
-    if failed:
-        blocks += ["", "❌ Failed:", _bullets(failed, 20)]
-    if errored:
-        blocks += ["", "💥 Errors:", _bullets(errored, 20)]
-    if skipped:
-        blocks += ["", "⚠️ Skipped:", _bullets(skipped, 20)]
+    # Optional details (reasons)
+    fail_details  = summary.get("fail_details")  or []
+    error_details = summary.get("error_details") or []
+    skipped_details = summary.get("skipped_details") or []
 
-    # breakdown + slowest
+    blocks = [
+        _build_header(summary),
+    ]
+
+    # Short context line
+    suites = _fmt_suite_counts(summary)
+    browsers = _browsers_used(summary)
+    ctx_line = " | ".join([p for p in (f"Browsers: {browsers}" if browsers else "", suites) if p])
+    if ctx_line:
+        blocks += [ctx_line]
+
+    # Quick totals line
+    blocks += [f"Totals: pass={passed_n} fail={fail_n} error={error_n} skip={skip_n}"]
+
+    # Problems first
+    if fail_details:
+        lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in fail_details[:list_limit]]
+        more = max(len(fail_details) - min(len(fail_details), list_limit), 0)
+        if more:
+            lines.append(f"(+{more} more)")
+        blocks += ["", "❌ Failed:", "\n".join(lines)]
+    elif failed:
+        blocks += ["", "❌ Failed:", _bullets_limited(failed, list_limit, _pretty_test_id)]
+
+    if error_details:
+        lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in error_details[:list_limit]]
+        more = max(len(error_details) - min(len(error_details), list_limit), 0)
+        if more:
+            lines.append(f"(+{more} more)")
+        blocks += ["", "💥 Errors:", "\n".join(lines)]
+    elif errored:
+        blocks += ["", "💥 Errors:", _bullets_limited(errored, list_limit, _pretty_test_id)]
+
+    # Skipped (optional)
+    if skip_n and show_skipped:
+        if skipped_details:
+            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in skipped_details[:list_limit]]
+            more = max(len(skipped_details) - min(len(skipped_details), list_limit), 0)
+            if more:
+                lines.append(f"(+{more} more)")
+            blocks += ["", "⚠️ Skipped:", "\n".join(lines)]
+        else:
+            blocks += ["", "⚠️ Skipped:", _bullets_limited(skipped, list_limit, _pretty_test_id)]
+
+    # Passed (show only if requested or short list)
+    if passed and (show_passed or len(passed) <= list_limit):
+        blocks += ["", f"✅ Passed (top {list_limit}):", _bullets_limited(passed, list_limit, _pretty_test_id)]
+
+    # Breakdown + slowest
     br = _build_browser_breakdown(summary)
     if br:
         blocks += ["", br]
     slow = summary.get("slow") or []
     if slow:
-        blocks += ["", "Slowest tests (top 5):"] + [f"- {full} — {_fmt_duration(t)}" for t, full in slow[:5]]
+        blocks += [
+            "",
+            "Slowest tests (top 5):",
+        ] + [f"- {_pretty_test_id(full)} — {_fmt_duration(t)}" for t, full in slow[:5]]
 
     return "\n".join([b for b in blocks if str(b).strip() != ""]).strip()
 
