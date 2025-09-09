@@ -2,6 +2,7 @@ Param(
   [string]$Message = "chore: sync",
   [switch]$NoAdd,
   [switch]$NoSubmodule,
+  [switch]$NoFixRemotes,
   [string]$Branch
 )
 
@@ -30,6 +31,31 @@ if (-not (Test-Path ".git")) {
 $current = if ($Branch) { $Branch } else { (& git rev-parse --abbrev-ref HEAD).Trim() }
 if (-not $current) { throw "Cannot determine current branch." }
 Write-Host "Current branch: $current" -ForegroundColor Green
+
+# --- Optional: normalize remotes so origin has single push-URL (GitHub) and Bitbucket is its own remote
+if (-not $NoFixRemotes) {
+  $originFetch = (& git remote get-url origin 2>$null).Trim()
+  $originPushAll = (& git remote get-url --push origin --all 2>$null)
+  if ($originPushAll) {
+    $pushUrls = @()
+    foreach ($line in ($originPushAll -split "`n")) { if ($line.Trim()) { $pushUrls += $line.Trim() } }
+    $distinct = $pushUrls | Select-Object -Unique
+    if ($distinct.Count -gt 1) {
+      foreach ($u in $distinct) {
+        if ($u -ne $originFetch) {
+          # Treat non-fetch URL as secondary (likely Bitbucket). Ensure separate 'bitbucket' remote.
+          $bbExisting = (& git remote get-url bitbucket 2>$null)
+          if (-not $bbExisting) {
+            Write-Host "Creating 'bitbucket' remote -> $u" -ForegroundColor Yellow
+            TryRun @('remote','add','bitbucket',$u)
+          }
+          Write-Host "Detaching extra push-URL from 'origin' -> $u" -ForegroundColor Yellow
+          TryRun @('remote','set-url','--delete','--push','origin',$u)
+        }
+      }
+    }
+  }
+}
 
 # Optionally stage changes in parent repo
 if (-not $NoAdd) {
