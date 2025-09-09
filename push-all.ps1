@@ -81,21 +81,41 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "No staged changes to commit in parent repo" -ForegroundColor DarkGray
 }
 
-# Ensure upstream
+# Robust push logic: prefer origin (fetch URL), fall back if origin push-URLs fail
 $hasUpstream = (& git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null).Trim()
+$originFetch = (& git remote get-url origin 2>$null).Trim()
+if (-not $originFetch) { throw "Remote 'origin' is not configured" }
+
 if (-not $hasUpstream) {
   Write-Host "Setting upstream to origin/$current" -ForegroundColor Yellow
-  Run @('push','-u','origin',$current)
+  try {
+    Run @('push','-u','origin',$current)
+  } catch {
+    Write-Warning "Push to origin failed (likely due to multiple push-URLs). Falling back to fetch URL only."
+    # Push directly to fetch URL, then set upstream manually
+    Run @('push',$originFetch,$current)
+    TryRun @('branch','--set-upstream-to="origin/'+$current+'"',$current)
+  }
 } else {
-  # Push to origin (may include multiple push-URLs)
-  Run @('push','origin',$current)
+  try {
+    Run @('push','origin',$current)
+  } catch {
+    Write-Warning "Push to origin failed; trying fetch URL only."
+    Run @('push',$originFetch,$current)
+  }
 }
 
-# Also push to 'bitbucket' remote if present (explicit)
+# Also push to 'bitbucket' remote if present (explicit), ignore errors
 $bbUrl = (& git remote get-url bitbucket 2>$null)
 if ($bbUrl) {
   Write-Host "Pushing to bitbucket remote as well" -ForegroundColor Yellow
   TryRun @('push','bitbucket',$current)
+} else {
+  # If origin had extra push-URLs, recommend using separate 'bitbucket' remote
+  $originPushAll = (& git remote get-url --push origin --all 2>$null)
+  if ($originPushAll -and ($originPushAll -split "`n").Count -gt 1) {
+    Write-Warning "Detected multiple push-URLs in 'origin'. Consider: `n  git remote set-url --delete --push origin <bitbucket-url>`n  git remote add bitbucket <bitbucket-url>"
+  }
 }
 
 Write-Host "\nAll done." -ForegroundColor Green
