@@ -11,6 +11,10 @@ on:
         description: "Browsers to run (comma-separated)"
         required: false
         default: "chromium,webkit"
+      run_login_success:
+        description: "Run login_success test (true/false)"
+        required: false
+        default: "false"
   push:
     branches: [ main ]
   pull_request:
@@ -39,6 +43,8 @@ jobs:
       POST_LOGIN_PAUSE_MS: "800"
       # JUnit output path for reporters
       JUNIT_XML: report/junit.xml
+      # Control login_success execution in CI
+      RUN_LOGIN_SUCCESS: ${{ inputs.run_login_success || vars.RUN_LOGIN_SUCCESS || 'false' }}
 
     steps:
       - name: Checkout
@@ -90,7 +96,16 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: |
           mkdir -p report test-results
-          pytest -vv tests \
+          EXTRA=""
+          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then
+            EXTRA="-k not test_login_success"
+          fi
+          if [ -z "${E2E_EMAIL}" ] || [ -z "${E2E_PASSWORD}" ]; then
+            # No credentials -> skip login_success even if requested
+            EXTRA="-k not test_login_success"
+          fi
+          echo "Pytest extra filter: ${EXTRA}"
+          pytest -vv tests ${EXTRA} \
             --browser=chromium --browser=webkit \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }}
