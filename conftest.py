@@ -293,3 +293,43 @@ def locales() -> dict[str, str]:
     for c in codes:
         out[c] = labels.get(c, c)
     return out or {"en": "English"}
+
+
+# ---------- Role credential fixtures (optional, env-driven) ----------
+
+def _cred_pair(user_env: str, pass_env: str, fallback_user: str | None = None, fallback_pass: str | None = None) -> dict:
+    return {
+        "email": (os.getenv(user_env) or (fallback_user or "")),
+        "password": (os.getenv(pass_env) or (fallback_pass or "")),
+    }
+
+
+@pytest.fixture(scope="session")
+def platform_admin_credentials(credentials) -> dict:
+    return _cred_pair("E2E_PLATFORM_ADMIN_EMAIL", "E2E_PLATFORM_ADMIN_PASSWORD", credentials.get("email"), credentials.get("password"))
+
+
+@pytest.fixture(scope="session")
+def super_admin_credentials() -> dict:
+    return _cred_pair("E2E_SUPER_ADMIN_EMAIL", "E2E_SUPER_ADMIN_PASSWORD")
+
+
+@pytest.fixture(scope="session")
+def manager_credentials() -> dict:
+    return _cred_pair("E2E_MANAGER_EMAIL", "E2E_MANAGER_PASSWORD")
+
+
+@pytest.fixture(scope="session")
+def staff_a_credentials(credentials) -> dict:
+    # fall back to generic credentials if specific staff not provided
+    return _cred_pair("E2E_STAFF_A_EMAIL", "E2E_STAFF_A_PASSWORD", credentials.get("email"), credentials.get("password"))
+
+
+@pytest.fixture(scope="session")
+def staff_b_credentials() -> dict:
+    return _cred_pair("E2E_STAFF_B_EMAIL", "E2E_STAFF_B_PASSWORD")
+
+
+@pytest.fixture(scope="session")
+def entry_path() -> str:
+    return (os.getenv("E2E_ENTRY_PATH") or "/customer-channels").strip()
