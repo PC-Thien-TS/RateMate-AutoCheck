@@ -181,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         "[role='menuitem'][href]",
         "[data-test*=nav] a[href]",
     ], help="Extra selectors to click/scan for navigation links")
+    ap.add_argument("--allow", nargs="*", default=[], help="Allow-list regex (match path)")
+    ap.add_argument("--deny", nargs="*", default=[], help="Deny-list regex (match path)")
     args = ap.parse_args(argv)
 
     if args.url and (args.base or args.start):
@@ -201,7 +203,9 @@ def main(argv: list[str] | None = None) -> int:
     site = (os.getenv("SITE") or "").strip() or guess_site(base_url)
     login_path_env = os.getenv("LOGIN_PATH") or None
     ignore_patterns = [r"/logout", r"/sign[-_]?out", r"\.pdf$", r"\.jpg$", r"\.png$", r"\.svg$"]
-    ignore_re = re.compile("|".join(ignore_patterns), re.I)
+    deny = ignore_patterns + (args.deny or [])
+    ignore_re = re.compile("|".join(deny), re.I)
+    allow_re = re.compile("|".join(args.allow), re.I) if args.allow else None
 
     email = os.getenv("E2E_EMAIL")
     password = os.getenv("E2E_PASSWORD")
@@ -258,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
                     pth = norm_path(u.path if u.scheme else href)
                     if ignore_re.search(pth):
                         continue
+                    if allow_re and not allow_re.search(pth):
+                        continue
                     if pth not in visited:
                         q.append((pth, depth + 1))
 
@@ -283,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
                                 continue
                             pth = norm_path(u.path if u.scheme else href)
                             if ignore_re.search(pth):
+                                continue
+                            if allow_re and not allow_re.search(pth):
                                 continue
                             if pth not in visited:
                                 q.append((pth, depth + 1))

@@ -1,7 +1,7 @@
 # pages/factory.py
 from importlib import import_module
 from .auth.login_page import LoginPage as GenericLoginPage
-from .auth.register_page import RegisterPage
+from .auth.register_page import RegisterPage as GenericRegisterPage
 
 class PageFactory:
     def __init__(self, page, site_cfg: dict):
@@ -22,14 +22,28 @@ class PageFactory:
                 pass
         return GenericLoginPage
 
-    def login(self) -> LoginPage:
+    def _register_cls(self):
+        """Resolve site-specific RegisterPage if available; fallback to generic."""
+        if self.site:
+            mod_name = f"pages.sites.{self.site}.auth_register"
+            try:
+                mod = import_module(mod_name)
+                cls = getattr(mod, "RegisterPage", None)
+                if cls:
+                    return cls
+            except Exception:
+                pass
+        return GenericRegisterPage
+
+    def login(self) -> GenericLoginPage:
         cls = self._login_cls()
         return cls(self.page, self.cfg["base_url"],
                    self.cfg.get("login_path", "/en/login"))
 
-    def register(self) -> RegisterPage:
-        return RegisterPage(self.page, self.cfg["base_url"],
-                            self.cfg.get("register_path", "/en/login"))
+    def register(self) -> GenericRegisterPage:
+        cls = self._register_cls()
+        return cls(self.page, self.cfg["base_url"],
+                   self.cfg.get("register_path", "/en/login"))
 
 __all__ = ["LoginPage", "RegisterPage", "PageFactory"]
     

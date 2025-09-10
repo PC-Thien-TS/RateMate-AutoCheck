@@ -98,6 +98,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install Python dependencies
         working-directory: ${{ env.WORKDIR }}
         run: |
@@ -108,6 +116,15 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: |
           python -m playwright install --with-deps chromium webkit
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-msplaywright-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-msplaywright-
 
       - name: Preflight base URL
         id: preflight
