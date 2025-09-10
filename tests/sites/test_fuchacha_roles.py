@@ -3,6 +3,7 @@ import os
 import re
 import contextlib
 import pytest
+pytestmark = [pytest.mark.roles]
 
 from pages.auth.login_page import LoginPage
 
@@ -21,7 +22,7 @@ def _visible_text(new_page, rx: str) -> bool:
 
 
 @pytest.mark.smoke
-def test_staff_cannot_access_user_manage(new_page, site, base_url, auth_paths):
+def test_staff_cannot_access_user_manage(new_page, site, base_url, auth_paths, staff_a_credentials):
     """Staff should not access /system-manage/user-manage.
 
     Uses env E2E_T1_STAFF_A_EMAIL / E2E_T1_STAFF_A_PASSWORD.
@@ -30,8 +31,8 @@ def test_staff_cannot_access_user_manage(new_page, site, base_url, auth_paths):
     if str(site).strip().lower() != "fuchacha":
         pytest.skip("SITE is not fuchacha")
 
-    email = os.getenv("E2E_T1_STAFF_A_EMAIL") or os.getenv("E2E_EMAIL")
-    password = os.getenv("E2E_T1_STAFF_A_PASSWORD") or os.getenv("E2E_PASSWORD")
+    email = staff_a_credentials.get("email")
+    password = staff_a_credentials.get("password")
     if not (email and password):
         pytest.skip("Missing staff credentials (E2E_T1_STAFF_A_* or E2E_*)")
 
@@ -61,4 +62,3 @@ def test_staff_cannot_access_user_manage(new_page, site, base_url, auth_paths):
     assert redirected_to_login or unauthorized_msg or (not admin_controls_text), (
         f"Staff should not access {target}, but admin controls appear"
     )
-

@@ -3,6 +3,7 @@ import os
 import re
 import contextlib
 import pytest
+pytestmark = [pytest.mark.roles]
 
 from pages.auth.login_page import LoginPage
 
@@ -37,4 +38,3 @@ def test_manager_sees_counts_not_phone_numbers(new_page, site, base_url, auth_pa
     # Look for sequences of 9+ digits (typical for phone numbers); should be absent
     has_raw_numbers = bool(re.search(r"(?<!\d)\d{9,}(?!\d)", body_text or ""))
     assert not has_raw_numbers, "Manager view should not expose raw phone numbers"
-

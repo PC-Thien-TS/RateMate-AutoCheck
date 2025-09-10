@@ -3,6 +3,7 @@ import os
 import re
 import contextlib
 import pytest
+pytestmark = [pytest.mark.roles]
 
 from pages.auth.login_page import LoginPage
 
@@ -42,4 +43,3 @@ def test_super_admin_cannot_see_other_tenant(new_page, site, base_url, auth_path
         assert not new_page.get_by_text(re.compile(re.escape(other_name), re.I)).first.is_visible(timeout=800), (
             f"Unexpected: saw other tenant '{other_name}' in User Manage list"
         )
-

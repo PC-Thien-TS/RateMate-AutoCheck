@@ -19,6 +19,10 @@ on:
         description: "Register path (override)"
         required: false
         default: ""
+      discover_urls:
+        description: "Optional: newline-separated URLs to auto-discover + generate tests"
+        required: false
+        default: ""
       browsers:
         description: "Browsers to run (comma-separated)"
         required: false
@@ -105,7 +109,26 @@ jobs:
         run: |
           python -m playwright install --with-deps chromium webkit
 
+      - name: Preflight base URL
+        id: preflight
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set +e
+          if command -v curl >/dev/null 2>&1; then
+            curl -I -sS -m 5 "$BASE_URL" >/dev/null
+            ok=$?
+          else
+            ok=0
+          fi
+          if [ "$ok" -ne 0 ]; then
+            echo "Base URL unreachable: $BASE_URL (preflight skip)"
+            echo "ok=false" >> $GITHUB_OUTPUT
+          else
+            echo "ok=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run tests (chromium + webkit)
+        if: ${{ steps.preflight.outputs.ok == 'true' && inputs.discover_urls == '' }}
         working-directory: ${{ env.WORKDIR }}
         run: |
           mkdir -p report test-results
@@ -117,6 +140,9 @@ jobs:
             # No credentials -> skip login_success even if requested
             EXTRA="not test_login_success"
           fi
+          if [ -z "${E2E_ALLOW_WRITE}" ]; then
+            if [ -n "$EXTRA" ]; then EXTRA="$EXTRA and not write"; else EXTRA="not write"; fi
+          fi
           echo "Pytest extra filter: ${EXTRA}"
           if [ -n "${EXTRA}" ]; then
             PYTEST_K_ARGS=( -k "${EXTRA}" )
@@ -127,6 +153,37 @@ jobs:
             --browser=chromium --browser=webkit \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }}
+
+      - name: Discover URLs and generate tests (optional)
+        if: ${{ inputs.discover_urls != '' }}
+        working-directory: ${{ env.WORKDIR }}
+        env:
+          DISCOVER_URLS: ${{ inputs.discover_urls }}
+        run: |
+          echo "Discover list:"; printf '%s\n' "$DISCOVER_URLS"
+          mkdir -p tests/generated
+          while IFS= read -r URL; do
+            [ -z "$URL" ] && continue
+            echo "Discovering: $URL"
+            python tools/discover_routes.py --url "$URL" --login-first --emit-tests --emit-yaml || true
+          done << 'EOF'
+          ${{ inputs.discover_urls }}
+          EOF
+
+      - name: Run generated tests (discover)
+        if: ${{ inputs.discover_urls != '' }}
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          set -e
+          ls -la tests/generated || true
+          for f in tests/generated/test_*_routes_generated.py; do
+            [ -f "$f" ] || continue
+            site=$(basename "$f" | sed -E 's/^test_(.+)_routes_generated\.py$/\1/')
+            echo "Running generated: $f (SITE=$site)"
+            SITE="$site" pytest -vv "$f" \
+              --browser=chromium --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+              --junitxml=${{ env.JUNIT_XML }} || true
+          done
 
       - name: Upload test artifacts
         if: ${{ always() }}

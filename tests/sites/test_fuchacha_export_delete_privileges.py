@@ -3,6 +3,7 @@ import os
 import re
 import contextlib
 import pytest
+pytestmark = [pytest.mark.roles]
 
 from pages.auth.login_page import LoginPage
 
@@ -70,4 +71,3 @@ def test_delete_all_visible_only_to_platform_admin(new_page, site, base_url, aut
                 delete_found = True
                 break
     assert not delete_found, "Super Admin should not see 'Delete All' control (platform-admin only)"
-
