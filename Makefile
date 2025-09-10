@@ -28,6 +28,9 @@ help:
 	@echo "  USE_CACHE=1 make run  - full suite CÓ cache"
 	@echo "  make smoke/baseline/verify/clean/warm-cache"
 	@echo "  make discover URL=... - auto-discover routes from start URL"
+	@echo "  make roles SITE=...   - run role permission tests (marker roles)"
+	@echo "  make write SITE=...   - run write tests (requires E2E_ALLOW_WRITE=1)"
+	@echo "  make secrets-check    - show which role creds are set"
 
 $(REPORT_DIR):
 	mkdir -p $(REPORT_DIR)
@@ -72,3 +75,22 @@ discover:
 	@echo "Discovering from: $(URL)";
 	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
 	  bash -lc 'python tools/discover_routes.py --url "$(URL)"'
+
+.PHONY: roles
+roles:
+	@if [ -z "$(SITE)" ]; then echo "Usage: make roles SITE=<site>"; exit 1; fi
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	  bash -lc 'SITE=$(SITE) pytest -vv -m roles tests --browser=chromium --screenshot=only-on-failure --tracing=retain-on-failure'
+
+.PHONY: write
+write:
+	@if [ -z "$(SITE)" ]; then echo "Usage: make write SITE=<site>"; exit 1; fi
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	  bash -lc 'SITE=$(SITE) E2E_ALLOW_WRITE=$${E2E_ALLOW_WRITE:-1} pytest -vv -m write tests --browser=chromium --screenshot=only-on-failure --tracing=retain-on-failure'
+
+.PHONY: secrets-check
+secrets-check:
+	@echo "Checking role credentials (non-empty env):"; \
+	for v in E2E_PLATFORM_ADMIN_EMAIL E2E_SUPER_ADMIN_EMAIL E2E_MANAGER_EMAIL E2E_STAFF_A_EMAIL E2E_STAFF_B_EMAIL; do \
+	  if [ -n "$${!v}" ]; then echo "  $$v=SET"; else echo "  $$v=missing"; fi; \
+	done

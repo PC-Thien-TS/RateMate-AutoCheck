@@ -183,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     ], help="Extra selectors to click/scan for navigation links")
     ap.add_argument("--allow", nargs="*", default=[], help="Allow-list regex (match path)")
     ap.add_argument("--deny", nargs="*", default=[], help="Deny-list regex (match path)")
+    ap.add_argument("--screenshot-dir", help="Save screenshots on navigation error (directory)")
     args = ap.parse_args(argv)
 
     if args.url and (args.base or args.start):
@@ -215,6 +216,11 @@ def main(argv: list[str] | None = None) -> int:
 
     visited: set[str] = set()
     q = deque([(start, 0)])
+
+    screenshot_dir = None
+    if getattr(args, 'screenshot_dir', None):
+        screenshot_dir = Path(args.screenshot_dir)
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -299,6 +305,12 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 # On navigation error consider path protected (may require auth) and continue
                 discovered_protected.add(path)
+                # Save a screenshot for diagnostics if requested
+                if screenshot_dir:
+                    safe = path.strip('/').replace('/', '_') or 'home'
+                    pshot = screenshot_dir / f"err_{safe}.png"
+                    with contextlib.suppress(Exception):
+                        page.screenshot(path=str(pshot))
                 continue
 
         browser.close()
