@@ -55,19 +55,28 @@ env:
 
 jobs:
   smoke:
-    name: Smoke (${% raw %}{{ matrix.browser }}{% endraw %})
+    name: Smoke (${{ matrix.site }} • ${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     if: ${{ (github.event.inputs.discover_urls == '' || !github.event.inputs.discover_urls) }}
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium]
+        include:
+          - site: ratemate
+            browser: chromium
+            base_url: https://store.ratemate.top
+            login_path: /en/login
+          - site: fuchacha
+            browser: chromium
+            base_url: https://qmtj8pvt-3000.asse.devtunnels.ms
+            login_path: /login/pwd-login
+            register_path: /login/pwd-login
     env:
-      SITE: ${{ env.SITE_INPUT || vars.SITE || 'ratemate' }}
-      BASE_URL: ${{ env.BASE_URL_INPUT || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
-      LOGIN_PATH: ${{ env.LOGIN_PATH_INPUT || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
-      REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
+      SITE: ${{ env.SITE_INPUT || matrix.site || vars.SITE || 'ratemate' }}
+      BASE_URL: ${{ env.BASE_URL_INPUT || matrix.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ env.LOGIN_PATH_INPUT || matrix.login_path || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
+      REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || matrix.register_path || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
       JUNIT_XML: report/junit.xml
@@ -285,4 +294,3 @@ jobs:
             report/**
             tests/generated/**
           if-no-files-found: warn
-
