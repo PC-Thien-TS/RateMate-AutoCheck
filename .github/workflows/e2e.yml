@@ -3,10 +3,22 @@ name: E2E
 on:
   workflow_dispatch:
     inputs:
+      site:
+        description: "SITE code (matches config/sites.yaml)"
+        required: false
+        default: "ratemate"
       base_url:
         description: "Base URL to test"
         required: false
         default: "https://store.ratemate.top"
+      login_path:
+        description: "Login path (override)"
+        required: false
+        default: ""
+      register_path:
+        description: "Register path (override)"
+        required: false
+        default: ""
       browsers:
         description: "Browsers to run (comma-separated)"
         required: false
@@ -30,11 +42,12 @@ jobs:
     permissions:
       contents: read
     env:
+      SITE: ${{ inputs.site || vars.SITE || 'ratemate' }}
       # URL/config with precedence: dispatch input -> repo variables -> secrets -> default
       BASE_URL: ${{ inputs.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
-      LOGIN_PATH: ${{ vars.LOGIN_PATH || secrets.LOGIN_PATH || '/en/login' }}
+      LOGIN_PATH: ${{ inputs.login_path || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
       ALT_LOGIN_PATH: ${{ vars.ALT_LOGIN_PATH || secrets.ALT_LOGIN_PATH || '/login' }}
-      REGISTER_PATH: ${{ vars.REGISTER_PATH || secrets.REGISTER_PATH || '/en/login' }}
+      REGISTER_PATH: ${{ inputs.register_path || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
       # Credentials (optional; tests skip if missing)
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}

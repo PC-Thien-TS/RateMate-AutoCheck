@@ -27,6 +27,7 @@ help:
 	@echo "  make run              - full suite (KHÔNG cache mặc định)"
 	@echo "  USE_CACHE=1 make run  - full suite CÓ cache"
 	@echo "  make smoke/baseline/verify/clean/warm-cache"
+	@echo "  make discover URL=... - auto-discover routes from start URL"
 
 $(REPORT_DIR):
 	mkdir -p $(REPORT_DIR)
@@ -63,3 +64,11 @@ warm-cache:
 	mkdir -p $(HOME)/.cache/ms-playwright
 	docker run $(DOCKER_RUN_OPTS) --user 0:0 -v "$(HOME)/.cache/ms-playwright:/ms-playwright" $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
 	  bash -lc 'python -m playwright install --with-deps'
+
+# Auto-discovery (runs in Docker image)
+.PHONY: discover
+discover:
+	@if [ -z "$(URL)" ]; then echo "Usage: make discover URL=https://host/start"; exit 1; fi
+	@echo "Discovering from: $(URL)";
+	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
+	  bash -lc 'python tools/discover_routes.py --url "$(URL)"'
