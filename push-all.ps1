@@ -3,6 +3,8 @@ Param(
   [switch]$NoAdd,
   [switch]$NoSubmodule,
   [switch]$NoFixRemotes,
+  [switch]$Mirror,
+  [string]$BitBranch,
   [string]$Branch
 )
 
@@ -134,8 +136,18 @@ if (-not $hasUpstream) {
 # Also push to 'bitbucket' remote if present (explicit), ignore errors
 $bbUrl = (& git remote get-url bitbucket 2>$null)
 if ($bbUrl) {
-  Write-Host "Pushing to bitbucket remote as well" -ForegroundColor Yellow
-  TryRun @('push','bitbucket',$current)
+  if ($Mirror) {
+    Write-Host "Mirroring to bitbucket (branches/tags, prune)" -ForegroundColor Yellow
+    TryRun @('push','--mirror','--prune','bitbucket')
+  } else {
+    Write-Host "Pushing to bitbucket remote as well" -ForegroundColor Yellow
+    if ([string]::IsNullOrWhiteSpace($BitBranch)) {
+      TryRun @('push','bitbucket',$current)
+    } else {
+      # Push current HEAD to a specific branch name on Bitbucket
+      TryRun @('push','bitbucket',"${current}:${BitBranch}")
+    }
+  }
 } else {
   # If origin had extra push-URLs, recommend using separate 'bitbucket' remote
   $originPushAll = (& git remote get-url --push origin --all 2>$null)

@@ -1,0 +1,35 @@
+name: Mirror to Bitbucket
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push --mirror to Bitbucket
+        env:
+          BB_USER: ${{ secrets.BITBUCKET_USERNAME }}
+          BB_APP_PASSWORD: ${{ secrets.BITBUCKET_APP_PASSWORD }}
+          BB_REPO: ${{ vars.BITBUCKET_REPO || secrets.BITBUCKET_REPO }}
+        run: |
+          if [ -z "$BB_USER" ] || [ -z "$BB_APP_PASSWORD" ] || [ -z "$BB_REPO" ]; then
+            echo "[mirror] Missing BITBUCKET_USERNAME / BITBUCKET_APP_PASSWORD / BITBUCKET_REPO. Skipping."
+            exit 0
+          fi
+          git remote add bitbucket https://$BB_USER:$BB_APP_PASSWORD@bitbucket.org/$BB_REPO.git
+          # Mirror all refs (branches, tags) and prune deleted ones on destination
+          git push --mirror --prune bitbucket
+          echo "[mirror] Mirror push completed to bitbucket.org/$BB_REPO"
+
