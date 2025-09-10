@@ -147,6 +147,17 @@ if ($bbUrl) {
       # Push current HEAD to a specific branch name on Bitbucket
       TryRun @('push','bitbucket',"${current}:${BitBranch}")
     }
+    # Print a handy PR URL to target 'dev' on Bitbucket
+    try {
+      $bbRemoteUrl = (& git remote get-url bitbucket 2>$null).Trim()
+      $slug = $null
+      if ($bbRemoteUrl -match 'bitbucket\.org[:/]+(.+?)(\.git)?$') { $slug = $Matches[1] }
+      if ($slug) {
+        $src = if ([string]::IsNullOrWhiteSpace($BitBranch)) { $current } else { $BitBranch }
+        $pr = "https://bitbucket.org/$slug/pull-requests/new?source=$src&dest=dev"
+        Write-Host "Create PR to dev: $pr" -ForegroundColor Green
+      }
+    } catch {}
   }
 } else {
   # If origin had extra push-URLs, recommend using separate 'bitbucket' remote
