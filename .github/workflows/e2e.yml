@@ -19,10 +19,6 @@ on:
         description: "Register path (override)"
         required: false
         default: ""
-      discover_urls:
-        description: "Optional: newline-separated URLs to auto-discover + generate tests"
-        required: false
-        default: ""
       browsers:
         description: "Browsers to run (comma-separated)"
         required: false
@@ -31,6 +27,14 @@ on:
         description: "Run login_success test (true/false)"
         required: false
         default: "false"
+      run_write:
+        description: "Run write tests (danger)"
+        required: false
+        default: "false"
+      discover_urls:
+        description: "Newline-separated URLs to auto-discover + generate tests"
+        required: false
+        default: ""
   push:
     branches: [ main ]
   pull_request:
@@ -39,157 +43,229 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SITE_INPUT: ${{ github.event.inputs.site }}
+  BASE_URL_INPUT: ${{ github.event.inputs.base_url }}
+  LOGIN_PATH_INPUT: ${{ github.event.inputs.login_path }}
+  REGISTER_PATH_INPUT: ${{ github.event.inputs.register_path }}
+  BROWSERS_INPUT: ${{ github.event.inputs.browsers }}
+  RUN_LOGIN_SUCCESS: ${{ github.event.inputs.run_login_success || vars.RUN_LOGIN_SUCCESS || 'false' }}
+  DISCOVER_URLS: ${{ github.event.inputs.discover_urls }}
+  RUN_WRITE: ${{ github.event.inputs.run_write || 'false' }}
+
 jobs:
-  tests:
+  smoke:
+    name: Smoke (${% raw %}{{ matrix.browser }}{% endraw %})
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    permissions:
-      contents: read
+    if: ${{ (github.event.inputs.discover_urls == '' || !github.event.inputs.discover_urls) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium]
     env:
-      SITE: ${{ inputs.site || vars.SITE || 'ratemate' }}
-      # URL/config with precedence: dispatch input -> repo variables -> secrets -> default
-      BASE_URL: ${{ inputs.base_url || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
-      LOGIN_PATH: ${{ inputs.login_path || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
-      ALT_LOGIN_PATH: ${{ vars.ALT_LOGIN_PATH || secrets.ALT_LOGIN_PATH || '/login' }}
-      REGISTER_PATH: ${{ inputs.register_path || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
-      # Credentials (optional; tests skip if missing)
+      SITE: ${{ env.SITE_INPUT || vars.SITE || 'ratemate' }}
+      BASE_URL: ${{ env.BASE_URL_INPUT || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ env.LOGIN_PATH_INPUT || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
+      REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
-      # Runtime tuning
-      NAV_TIMEOUT_MS: "60000"
-      POST_LOGIN_PAUSE_MS: "800"
-      # JUnit output path for reporters
       JUNIT_XML: report/junit.xml
-      # Control login_success execution in CI
-      RUN_LOGIN_SUCCESS: ${{ inputs.run_login_success || vars.RUN_LOGIN_SUCCESS || 'false' }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Determine project directory
+      - uses: actions/checkout@v4
+      - name: Detect project dir
         id: detect
         run: |
-          if [ -f "requirements.txt" ] && [ -d "tests" ]; then
-            echo "WORKDIR=." >> $GITHUB_ENV
-            echo "Detected project at repo root"
-          elif [ -d "RateMate-AutoCheck" ]; then
-            echo "WORKDIR=RateMate-AutoCheck" >> $GITHUB_ENV
-            echo "Detected project at RateMate-AutoCheck/"
-          else
-            echo "Project directory not found (requirements.txt/tests missing)." >&2
-            ls -la
-            exit 1
-          fi
-
-      - name: Sanitize pytest.ini (dedupe addopts)
-        working-directory: ${{ env.WORKDIR }}
-        run: |
-          if [ -f pytest.ini ]; then
-            n=$(grep -cE '^addopts\s*=' pytest.ini || true)
-            if [ "$n" -gt 1 ]; then
-              echo "Sanitizing duplicate addopts in pytest.ini"
-              awk 'BEGIN{seen=0} {if($0 ~ /^addopts\s*=/){ if(seen==0){print; seen=1} } else {print}}' pytest.ini > pytest.ini.san && mv pytest.ini.san pytest.ini
-            fi
-          fi
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+          if [ -f requirements.txt ] && [ -d tests ]; then echo WORKDIR=. >> $GITHUB_ENV; else echo WORKDIR=. >> $GITHUB_ENV; fi
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install Python dependencies
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install deps
         working-directory: ${{ env.WORKDIR }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright browsers
+      - name: Install Playwright
         working-directory: ${{ env.WORKDIR }}
-        run: |
-          python -m playwright install --with-deps chromium webkit
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/ms-playwright
-          key: ${{ runner.os }}-msplaywright-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-msplaywright-
-
+        run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Preflight base URL
         id: preflight
         working-directory: ${{ env.WORKDIR }}
         run: |
           set +e
-          if command -v curl >/dev/null 2>&1; then
-            curl -I -sS -m 5 "$BASE_URL" >/dev/null
-            ok=$?
-          else
-            ok=0
-          fi
-          if [ "$ok" -ne 0 ]; then
-            echo "Base URL unreachable: $BASE_URL (preflight skip)"
-            echo "ok=false" >> $GITHUB_OUTPUT
-          else
-            echo "ok=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run tests (chromium + webkit)
-        if: ${{ steps.preflight.outputs.ok == 'true' && inputs.discover_urls == '' }}
+          if command -v curl >/dev/null 2>&1; then curl -I -sS -m 5 "$BASE_URL" >/dev/null; ok=$?; else ok=0; fi
+          if [ "$ok" -ne 0 ]; then echo ok=false >> $GITHUB_OUTPUT; else echo ok=true >> $GITHUB_OUTPUT; fi
+      - name: Run smoke tests
+        if: ${{ steps.preflight.outputs.ok == 'true' }}
         working-directory: ${{ env.WORKDIR }}
         run: |
           mkdir -p report test-results
-          EXTRA=""
-          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then
-            EXTRA="not test_login_success"
-          fi
-          if [ -z "${E2E_EMAIL}" ] || [ -z "${E2E_PASSWORD}" ]; then
-            # No credentials -> skip login_success even if requested
-            EXTRA="not test_login_success"
-          fi
-          if [ -z "${E2E_ALLOW_WRITE}" ]; then
-            if [ -n "$EXTRA" ]; then EXTRA="$EXTRA and not write"; else EXTRA="not write"; fi
-          fi
-          echo "Pytest extra filter: ${EXTRA}"
-          if [ -n "${EXTRA}" ]; then
-            PYTEST_K_ARGS=( -k "${EXTRA}" )
-          else
-            PYTEST_K_ARGS=()
-          fi
-          pytest -vv tests "${PYTEST_K_ARGS[@]}" \
-            --browser=chromium --browser=webkit \
+          EXTRA="smoke and not write"
+          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then EXTRA="$EXTRA and not test_login_success"; fi
+          pytest -vv -m "$EXTRA" tests \
+            --browser=${{ matrix.browser }} \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: smoke-artifacts-${{ matrix.browser }}-${{ github.run_number }}
+          path: |
+            ${{ env.WORKDIR }}/report/**
+            ${{ env.WORKDIR }}/test-results/**
+          if-no-files-found: warn
 
-      - name: Discover URLs and generate tests (optional)
-        if: ${{ inputs.discover_urls != '' }}
-        working-directory: ${{ env.WORKDIR }}
-        env:
-          DISCOVER_URLS: ${{ inputs.discover_urls }}
+  roles:
+    name: Roles (${% raw %}{{ matrix.browser }}{% endraw %})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    if: ${{ (github.event.inputs.discover_urls == '' || !github.event.inputs.discover_urls) }}
+    needs: smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium]
+    env:
+      SITE: ${{ env.SITE_INPUT || vars.SITE || 'ratemate' }}
+      BASE_URL: ${{ env.BASE_URL_INPUT || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ env.LOGIN_PATH_INPUT || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
+      REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      JUNIT_XML: report/junit.xml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Playwright
+        run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Run role tests (skip if missing creds)
+        run: |
+          mkdir -p report test-results
+          pytest -vv -m "roles and not write" tests \
+            --browser=${{ matrix.browser }} \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --junitxml=${{ env.JUNIT_XML }} || true
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: roles-artifacts-${{ matrix.browser }}-${{ github.run_number }}
+          path: |
+            report/**
+            test-results/**
+          if-no-files-found: warn
+
+  write:
+    name: Write (${% raw %}{{ matrix.browser }}{% endraw %})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    if: ${{ github.event.inputs.run_write == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium]
+    env:
+      SITE: ${{ env.SITE_INPUT || vars.SITE || 'ratemate' }}
+      BASE_URL: ${{ env.BASE_URL_INPUT || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ env.LOGIN_PATH_INPUT || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
+      REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      E2E_ALLOW_WRITE: "1"
+      JUNIT_XML: report/junit.xml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Playwright
+        run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Run write tests
+        run: |
+          mkdir -p report test-results
+          pytest -vv -m write tests \
+            --browser=${{ matrix.browser }} \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --junitxml=${{ env.JUNIT_XML }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: write-artifacts-${{ matrix.browser }}-${{ github.run_number }}
+          path: |
+            report/**
+            test-results/**
+          if-no-files-found: warn
+
+  discover:
+    name: Discover & Run Generated
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    if: ${{ github.event.inputs.discover_urls != '' }}
+    env:
+      SITE: ${{ env.SITE_INPUT || vars.SITE || 'ratemate' }}
+      BASE_URL: ${{ env.BASE_URL_INPUT || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
+      LOGIN_PATH: ${{ env.LOGIN_PATH_INPUT || vars.LOGIN_PATH || secrets.LOGIN_PATH || '' }}
+      REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      DISCOVER_URLS: ${{ github.event.inputs.discover_urls }}
+      JUNIT_XML: report/junit.xml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Playwright
+        run: python -m playwright install --with-deps chromium
+      - name: Discover URLs and generate tests
         run: |
           echo "Discover list:"; printf '%s\n' "$DISCOVER_URLS"
-          mkdir -p tests/generated
+          mkdir -p tests/generated report/discover
           while IFS= read -r URL; do
             [ -z "$URL" ] && continue
             echo "Discovering: $URL"
-            python tools/discover_routes.py --url "$URL" --login-first --emit-tests --emit-yaml || true
+            python tools/discover_routes.py --url "$URL" --login-first --emit-tests --emit-yaml --screenshot-dir report/discover || true
           done << 'EOF'
-          ${{ inputs.discover_urls }}
+          ${{ env.DISCOVER_URLS }}
           EOF
-
-      - name: Run generated tests (discover)
-        if: ${{ inputs.discover_urls != '' }}
-        working-directory: ${{ env.WORKDIR }}
+      - name: Run generated tests
         run: |
           set -e
           ls -la tests/generated || true
@@ -197,32 +273,16 @@ jobs:
             [ -f "$f" ] || continue
             site=$(basename "$f" | sed -E 's/^test_(.+)_routes_generated\.py$/\1/')
             echo "Running generated: $f (SITE=$site)"
-            SITE="$site" pytest -vv "$f" \
-              --browser=chromium --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            SITE="$site" pytest -vv "$f" --browser=chromium \
+              --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
               --junitxml=${{ env.JUNIT_XML }} || true
           done
-
-      - name: Upload test artifacts
+      - uses: actions/upload-artifact@v4
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts-${{ github.run_number }}
+          name: discover-artifacts-${{ github.run_number }}
           path: |
-            ${{ env.WORKDIR }}/report/**
-            ${{ env.WORKDIR }}/test-results/**
+            report/**
+            tests/generated/**
           if-no-files-found: warn
 
-      - name: Telegram report (optional)
-        if: ${{ always() }}
-        working-directory: ${{ env.WORKDIR }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_PROXY: ${{ secrets.TELEGRAM_PROXY }}
-          TELEGRAM_MESSAGE_PREFIX: "E2E"
-        run: |
-          if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
-            echo "Skipping Telegram: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set";
-            exit 0;
-          fi
-          python Ci/report_telegram.py
