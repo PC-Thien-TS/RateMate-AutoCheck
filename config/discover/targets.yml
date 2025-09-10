@@ -1,0 +1,36 @@
+# Versioned config for auto-discover + auto-test
+# DO NOT put secrets into this file. Use environment variables or GitHub Secrets.
+
+version: 1
+
+defaults:
+  login_first: true               # try login if E2E_* creds available
+  allow: []                       # regex list; when non-empty, only paths matching one of these are kept
+  deny: ['\.(png|jpg|svg)$']     # regex list to exclude
+  nav_selectors:                  # where to look for navigation links
+    - "aside a[href]"
+    - "nav a[href]"
+    - "[role='menuitem'][href]"
+    - "[data-test*=nav] a[href]"
+  browsers: [chromium]            # test runners for generated tests
+  markers: "smoke"               # pytest -m filter when running generated tests
+
+targets:
+  - site: fuchacha
+    base_url: "https://qmtj8pvt-3000.asse.devtunnels.ms"
+    login_path: "/login/pwd-login"
+    seeds:
+      - "https://qmtj8pvt-3000.asse.devtunnels.ms/login/pwd-login"
+    allow:
+      - '^/login'
+      - '^/home'
+      - '^/system-manage'
+    # credentials: use env: E2E_FUCHACHA_EMAIL / E2E_FUCHACHA_PASSWORD or the global E2E_EMAIL/PASSWORD
+
+  - site: ratemate
+    base_url: "https://store.ratemate.top"
+    login_path: "/en/login"
+    seeds:
+      - "https://store.ratemate.top/en/login"
+    allow: ['^/en/']
+
