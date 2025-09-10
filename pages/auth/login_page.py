@@ -75,7 +75,12 @@ class LoginPage:
         """
         code = (code or "").strip().lower()
         # 1) Try common UI controls by label
-        rx = re.compile(r"(vi|tieng\s*viet|vietnamese)" if code == "vi" else r"(en|english)", re.I)
+        if code == "vi":
+            rx = re.compile(r"(vi|tieng\s*viet|vietnamese)", re.I)
+        elif code in ("zh", "zh-cn", "zh-hans", "zh-hant"):
+            rx = re.compile(r"(zh|中文|简体中文|繁體中文|chinese)", re.I)
+        else:
+            rx = re.compile(r"(en|english)", re.I)
         cand = self.page.get_by_role("button", name=rx).or_(
             self.page.get_by_role("link", name=rx)
         )

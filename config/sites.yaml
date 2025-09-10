@@ -12,3 +12,12 @@ sites:
       - "/en/store"
       - "/en/product"
       - "/en/QR"
+  fuchacha:
+    base_url: "https://qmtj8pvt-3000.asse.devtunnels.ms"
+    login_path: "/login/pwd-login"
+    register_path: "/login/pwd-login"
+    locales: ["en", "zh"]
+    routes:
+      - "/login/pwd-login"
+      - "/home"
+      - "/system-manage/user-manage"
