@@ -1,0 +1,85 @@
+name: E2E (ratemate)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_login_success:
+        description: "Run login_success test (true/false)"
+        required: false
+        default: "false"
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: e2e-ratemate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SITE: ratemate
+  BASE_URL: https://store.ratemate.top
+  LOGIN_PATH: /en/login
+  REGISTER_PATH: /en/register
+  RUN_LOGIN_SUCCESS: ${{ github.event.inputs.run_login_success || 'false' }}
+  JUNIT_XML: report/junit.xml
+
+jobs:
+  smoke:
+    name: Smoke (ratemate · ${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium]
+    env:
+      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-1.55.0
+          restore-keys: ${{ runner.os }}-ms-playwright-
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Playwright
+        run: python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Run smoke tests
+        run: |
+          mkdir -p report test-results
+          EXTRA="smoke and not write"
+          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then EXTRA="$EXTRA and not test_login_success"; fi
+          pytest -vv -m "$EXTRA" tests \
+            --browser=${{ matrix.browser }} \
+            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
+            --junitxml=${{ env.JUNIT_XML }} \
+            --reruns 1 --reruns-delay 1
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: smoke-artifacts-ratemate-${{ matrix.browser }}-${{ github.run_number }}
+          path: |
+            report/**
+            test-results/**
+          if-no-files-found: warn
+      - name: Send Telegram report
+        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python Ci/report_telegram.py || true
+
