@@ -79,6 +79,8 @@ jobs:
       REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || matrix.register_path || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       JUNIT_XML: report/junit.xml
     steps:
       - uses: actions/checkout@v4
@@ -135,7 +137,7 @@ jobs:
             --junitxml=${{ env.JUNIT_XML }} \
             --reruns 1 --reruns-delay 1
       - name: Send Telegram report
-        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -167,6 +169,8 @@ jobs:
       REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       JUNIT_XML: report/junit.xml
     steps:
       - uses: actions/checkout@v4
@@ -200,7 +204,7 @@ jobs:
             --junitxml=${{ env.JUNIT_XML }} \
             --reruns 1 --reruns-delay 1 || true
       - name: Send Telegram report
-        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -232,6 +236,8 @@ jobs:
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
       E2E_ALLOW_WRITE: "1"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       JUNIT_XML: report/junit.xml
     steps:
       - uses: actions/checkout@v4
@@ -264,7 +270,7 @@ jobs:
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }}
       - name: Send Telegram report
-        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -292,6 +298,8 @@ jobs:
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
       DISCOVER_URLS: ${{ github.event.inputs.discover_urls }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       JUNIT_XML: report/junit.xml
     steps:
       - uses: actions/checkout@v4
@@ -334,7 +342,7 @@ jobs:
               --junitxml=${{ env.JUNIT_XML }} --reruns 1 --reruns-delay 1 || true
           done
       - name: Send Telegram report
-        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
