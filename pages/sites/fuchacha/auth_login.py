@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from playwright.sync_api import Page, Locator
+from pages.core.base_page import BasePage
 from pages.common_helpers import ResponseLike
 
 
@@ -21,15 +22,14 @@ def _first_visible(scope: Locator | Page, selector: str | None = None, rx: re.Pa
         return None
 
 
-class LoginPage:
+class LoginPage(BasePage):
     """Login page tailored for Fuchacha UI (User Name + Password + Login).
 
     Keeps the same public API with generic LoginPage (goto/login returning ResponseLike).
     """
 
     def __init__(self, page: Page, base_url: str, login_path: str = "/login/pwd-login"):
-        self.page = page
-        self.base_url = base_url.rstrip("/")
+        super().__init__(page, base_url)
         self.login_path = login_path if login_path.startswith("/") else f"/{login_path}"
 
     def goto(self):
@@ -107,4 +107,3 @@ class LoginPage:
         except Exception:
             pass
         return ResponseLike(status=status, url=url, body=body)
-

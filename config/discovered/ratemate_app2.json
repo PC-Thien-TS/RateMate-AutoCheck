@@ -1,0 +1,8 @@
+{
+  "base_url": "https://app2.ratemate.top",
+  "login_path": "/en/login",
+  "public": [],
+  "protected": [
+    "/en/login"
+  ]
+}

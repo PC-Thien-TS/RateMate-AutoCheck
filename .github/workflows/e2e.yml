@@ -95,6 +95,18 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-1.55.0
+          restore-keys: ${{ runner.os }}-ms-playwright-
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-1.55.0
+          restore-keys: ${{ runner.os }}-ms-playwright-
       - name: Install deps
         working-directory: ${{ env.WORKDIR }}
         run: |
@@ -120,7 +132,15 @@ jobs:
           pytest -vv -m "$EXTRA" tests \
             --browser=${{ matrix.browser }} \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-            --junitxml=${{ env.JUNIT_XML }}
+            --junitxml=${{ env.JUNIT_XML }} \
+            --reruns 1 --reruns-delay 1
+      - name: Send Telegram report
+        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python Ci/report_telegram.py || true
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
@@ -131,7 +151,7 @@ jobs:
           if-no-files-found: warn
 
   roles:
-    name: Roles (${% raw %}{{ matrix.browser }}{% endraw %})
+    name: Roles (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     if: ${{ (github.event.inputs.discover_urls == '' || !github.event.inputs.discover_urls) }}
@@ -159,6 +179,12 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-1.55.0
+          restore-keys: ${{ runner.os }}-ms-playwright-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
@@ -171,7 +197,15 @@ jobs:
           pytest -vv -m "roles and not write" tests \
             --browser=${{ matrix.browser }} \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-            --junitxml=${{ env.JUNIT_XML }} || true
+            --junitxml=${{ env.JUNIT_XML }} \
+            --reruns 1 --reruns-delay 1 || true
+      - name: Send Telegram report
+        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python Ci/report_telegram.py || true
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
@@ -182,7 +216,7 @@ jobs:
           if-no-files-found: warn
 
   write:
-    name: Write (${% raw %}{{ matrix.browser }}{% endraw %})
+    name: Write (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     if: ${{ github.event.inputs.run_write == 'true' }}
@@ -210,6 +244,12 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-1.55.0
+          restore-keys: ${{ runner.os }}-ms-playwright-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
@@ -223,6 +263,13 @@ jobs:
             --browser=${{ matrix.browser }} \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }}
+      - name: Send Telegram report
+        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python Ci/report_telegram.py || true
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
@@ -284,8 +331,15 @@ jobs:
             echo "Running generated: $f (SITE=$site)"
             SITE="$site" pytest -vv "$f" --browser=chromium \
               --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-              --junitxml=${{ env.JUNIT_XML }} || true
+              --junitxml=${{ env.JUNIT_XML }} --reruns 1 --reruns-delay 1 || true
           done
+      - name: Send Telegram report
+        if: ${{ always() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python Ci/report_telegram.py || true
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:

@@ -90,7 +90,7 @@ def _emit_tests(site: str, data: dict):
     from pathlib import Path
     tests_dir = Path("tests/generated")
     tests_dir.mkdir(parents=True, exist_ok=True)
-    path = tests_dir / f"test_{site}_routes_generated.py"
+    out_path = tests_dir / f"test_{site}_routes_generated.py"
     base_url = data.get("base_url", "")
     login_path = data.get("login_path", "/login")
     public = data.get("public") or []
@@ -125,15 +125,15 @@ def _maybe_login(page, base_url, login_path, email, password):
 def test_public_routes_open(new_page, site, base_url, path):
     if str(site).strip().lower() != SITE_KEY:
         pytest.skip("Different site")
-    url = f"{base_url.rstrip('/')}{path}"
+    url = f"{{base_url.rstrip('/')}}{{path}}"
     try:
         new_page.set_default_navigation_timeout(30000)
         new_page.goto(url, wait_until="domcontentloaded")
         with contextlib.suppress(Exception):
             new_page.wait_for_timeout(200)
-        assert new_page.url.startswith(base_url), f"Unexpected navigation for {path} -> {new_page.url}"
+        assert new_page.url.startswith(base_url), f"Unexpected navigation for {{path}} -> {{new_page.url}}"
     except Exception as e:
-        pytest.skip(f"unreachable {url}: {e}")
+        pytest.skip(f"unreachable {{url}}: {{e}}")
 
 
 @pytest.mark.smoke
@@ -145,7 +145,7 @@ def test_protected_routes_behavior(new_page, site, base_url, path):
     email = os.getenv("E2E_EMAIL")
     password = os.getenv("E2E_PASSWORD")
     _maybe_login(new_page, base_url, LOGIN_PATH_DISCOVERED, email, password)
-    url = f"{base_url.rstrip('/')}{path}"
+    url = f"{{base_url.rstrip('/')}}{{path}}"
     try:
         new_page.set_default_navigation_timeout(30000)
         new_page.goto(url, wait_until="domcontentloaded")
@@ -154,14 +154,14 @@ def test_protected_routes_behavior(new_page, site, base_url, path):
         # If logged in, should not be at login page. If not logged in, allow redirect to login.
         at_login = bool(re.search(r"/(log[-_]?in|sign[-_]?in)(/|\\?|$)", new_page.url, re.I))
         if email and password:
-            assert not at_login, f"Logged in but redirected to login for {path}: {new_page.url}"
+            assert not at_login, f"Logged in but redirected to login for {{path}}: {{new_page.url}}"
         else:
-            assert at_login or base_url in new_page.url, f"Expected login redirect for {path}"
+            assert at_login or base_url in new_page.url, f"Expected login redirect for {{path}}"
     except Exception as e:
-        pytest.skip(f"unreachable {url}: {e}")
+        pytest.skip(f"unreachable {{url}}: {{e}}")
 """
-    path.write_text(body, encoding="utf-8")
-    print(f"[discover] Wrote tests to {path}")
+    out_path.write_text(body, encoding="utf-8")
+    print(f"[discover] Wrote tests to {out_path}")
 
 
 def main(argv: list[str] | None = None) -> int:

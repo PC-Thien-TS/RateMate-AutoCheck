@@ -1,0 +1,8 @@
+base_url: https://app2.ratemate.top
+auth_paths:
+  login: /en/login
+  register: /en/login
+routes:
+  public: []
+  protected:
+  - /en/login

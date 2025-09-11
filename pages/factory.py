@@ -45,5 +45,9 @@ class PageFactory:
         return cls(self.page, self.cfg["base_url"],
                    self.cfg.get("register_path", "/en/login"))
 
-__all__ = ["LoginPage", "RegisterPage", "PageFactory"]
+# Re-export generic pages for convenience imports
+LoginPage = GenericLoginPage
+RegisterPage = GenericRegisterPage
+
+__all__ = ["PageFactory", "LoginPage", "RegisterPage"]
     

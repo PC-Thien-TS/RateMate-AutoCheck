@@ -5,6 +5,7 @@ import time
 import contextlib
 from typing import Optional
 from playwright.sync_api import Page, Locator
+from pages.core.base_page import BasePage
 from pages.common_helpers import ResponseLike, fill_force, is_inside_ion_searchbar
 
 
@@ -77,14 +78,13 @@ def _input_union(scope: Locator, patterns: str) -> Locator:
 
 # ---------- Page Object ----------
 
-class RegisterPage:
+class RegisterPage(BasePage):
     def __init__(self, page: Page, base_url: str, path: str):
-        self.page = page
-        self.base_url = (base_url or "").rstrip("/")
+        super().__init__(page, base_url)
         self.path = path if path.startswith("/") else f"/{path}"
 
     def goto(self):
-        self.page.goto(f"{self.base_url}{self.path}", wait_until="domcontentloaded")
+        self.goto_path(self.path, wait_until="domcontentloaded")
 
     def _open_register_ui(self):
         with contextlib.suppress(Exception):

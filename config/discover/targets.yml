@@ -1,4 +1,4 @@
-# Versioned config for auto-discover + auto-test
+﻿# Versioned config for auto-discover + auto-test
 # DO NOT put secrets into this file. Use environment variables or GitHub Secrets.
 
 version: 1
@@ -34,3 +34,11 @@ targets:
       - "https://store.ratemate.top/en/login"
     allow: ['^/en/']
 
+
+  - site: ratemate_app2
+    base_url: "https://app2.ratemate.top"
+    login_path: "/en/login"
+    seeds:
+      - "https://app2.ratemate.top/en/login"
+      - "https://app2.ratemate.top/home"
+    allow: ['^/en/','^/login','^/home']
