@@ -176,10 +176,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--emit-yaml", action="store_true", help="Also emit config/sites/<site>.yml with discovered data")
     ap.add_argument("--login-first", action="store_true", help="Attempt login before crawling (requires creds)")
     ap.add_argument("--nav-selectors", nargs="*", default=[
+        # Traditional navs
         "aside a[href]",
         "nav a[href]",
         "[role='menuitem'][href]",
         "[data-test*=nav] a[href]",
+        # Ionic/Angular style
+        "ion-router-link",
+        "ion-tab-button",
+        "ion-item[routerLink]",
+        "[routerLink]",
+        "ion-button[routerLink]",
     ], help="Extra selectors to click/scan for navigation links")
     ap.add_argument("--allow", nargs="*", default=[], help="Allow-list regex (match path)")
     ap.add_argument("--deny", nargs="*", default=[], help="Deny-list regex (match path)")
@@ -273,6 +280,36 @@ def main(argv: list[str] | None = None) -> int:
                     if pth not in visited:
                         q.append((pth, depth + 1))
 
+                # Extract Ionic/Angular router links
+                ionic_hrefs = []
+                try:
+                    # ion-router-link elements may have an internal anchor; try attribute first
+                    ionic_hrefs += page.eval_on_selector_all(
+                        "ion-router-link",
+                        "nodes => nodes.map(n => n.getAttribute('href') || n.getAttribute('routerLink'))",
+                    ) or []
+                except Exception:
+                    pass
+                try:
+                    # Any element with [routerLink] attribute
+                    ionic_hrefs += page.eval_on_selector_all(
+                        "[routerLink]",
+                        "nodes => nodes.map(n => n.getAttribute('routerLink'))",
+                    ) or []
+                except Exception:
+                    pass
+                # Normalize and enqueue
+                for href in ionic_hrefs:
+                    if not href:
+                        continue
+                    pth = norm_path(href)
+                    if ignore_re.search(pth):
+                        continue
+                    if allow_re and not allow_re.search(pth):
+                        continue
+                    if pth not in visited:
+                        q.append((pth, depth + 1))
+
                 # Try to expand common navigation containers and re-scan
                 for sel in args.nav_selectors:
                     try:
@@ -285,7 +322,13 @@ def main(argv: list[str] | None = None) -> int:
                         # Re-scan links in nav area
                         hrefs2 = page.eval_on_selector_all(
                             sel,
-                            "nodes => Array.from(new Set(nodes.flatMap(n => Array.from(n.querySelectorAll('a[href]')).map(a => a.getAttribute('href')))))",
+                            "nodes => Array.from(new Set(nodes.flatMap(n => {\n"
+                            "  const out = [];\n"
+                            "  out.push(...Array.from(n.querySelectorAll('a[href]')).map(a => a.getAttribute('href')));\n"
+                            "  out.push(...(n.getAttribute && n.getAttribute('href') ? [n.getAttribute('href')] : []));\n"
+                            "  out.push(...(n.getAttribute && n.getAttribute('routerLink') ? [n.getAttribute('routerLink')] : []));\n"
+                            "  return out;\n"
+                            "})))",
                         )
                         for href in hrefs2 or []:
                             if not href:

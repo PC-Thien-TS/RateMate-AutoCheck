@@ -69,6 +69,9 @@ jobs:
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }} \
             --reruns 1 --reruns-delay 1
+      - name: Export coverage summary
+        run: |
+          python tools/export_coverage.py --site "$SITE" --junit "$JUNIT_XML" --out report || true
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:

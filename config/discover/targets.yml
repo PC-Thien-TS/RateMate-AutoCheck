@@ -12,6 +12,12 @@ defaults:
     - "nav a[href]"
     - "[role='menuitem'][href]"
     - "[data-test*=nav] a[href]"
+    # Ionic/Angular style
+    - "ion-router-link"
+    - "ion-tab-button"
+    - "ion-item[routerLink]"
+    - "[routerLink]"
+    - "ion-button[routerLink]"
   browsers: [chromium]            # test runners for generated tests
   markers: "smoke"               # pytest -m filter when running generated tests
 
