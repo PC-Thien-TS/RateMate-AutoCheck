@@ -4,6 +4,7 @@ import contextlib
 from typing import Optional
 
 from playwright.sync_api import Page, Locator
+from pages.core.base_page import BasePage
 from pages.common_helpers import ResponseLike, fill_force, is_inside_ion_searchbar
 
 # -------------------- helpers --------------------
@@ -34,10 +35,9 @@ _EMAIL_LABEL_PATTERN = re.compile(r"(e-?mail|email|username|user\s*name|phone|mo
 
 # -------------------- Login Page --------------------
 
-class LoginPage:
+class LoginPage(BasePage):
     def __init__(self, page: Page, base_url: str, login_path: str = "/login"):
-        self.page = page
-        self.base_url = base_url.rstrip("/")
+        super().__init__(page, base_url)
         self.login_path = login_path if login_path.startswith("/") else f"/{login_path}"
 
     def _candidate_paths(self):

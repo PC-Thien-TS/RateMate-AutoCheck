@@ -1,8 +1,9 @@
-# pages/sites/ratemate2/auth_login.py
+# pages/sites/ratemate/auth_login.py
 from __future__ import annotations
 import re, time
 from typing import Optional
 from playwright.sync_api import Page, Locator
+from pages.core.base_page import BasePage
 
 _ERR_RE = re.compile(r"(incorrect|not\s*valid|invalid|wrong|failed|error|required)", re.I)
 
@@ -18,12 +19,11 @@ def _union_error(scope):
         loc = loc.or_(scope.locator("css=" + g))
     return loc
 
-class LoginPage:
+class LoginPage(BasePage):
     """Login modal có tab 'Phone number' / 'Email' và nút 'Sign in'."""
 
     def __init__(self, page: Page, base_url: str, path: str):
-        self.page = page
-        self.base_url = base_url.rstrip("/")
+        super().__init__(page, base_url)
         self.path = path if path.startswith("/") else f"/{path}"
 
     # ---------- navigation ----------

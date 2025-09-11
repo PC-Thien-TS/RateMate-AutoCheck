@@ -21,3 +21,15 @@ sites:
       - "/login/pwd-login"
       - "/home"
       - "/system-manage/user-manage"
+
+  ratemate_app2:
+    base_url: "https://app2.ratemate.top"
+    login_path: "/en/login"
+    register_path: "/en/login"
+    locales: ["en"]
+    routes:
+      public:
+        - "/login"
+        - "/en/login"
+      protected:
+        - "/home"
