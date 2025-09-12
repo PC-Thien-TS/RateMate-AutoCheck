@@ -13,11 +13,14 @@ def _norm(p: str) -> str:
     return re.sub(r"/+$", "", s)
 
 def _variants(path: str):
-    """Return valid variants for a path: /x and /en/x."""
+    """Return valid variants for a path: /x and /<locale>/x for known locales."""
     s = _norm(path)
     out = {s}
-    if s and not s.startswith("/en/"):
-        out.add(f"/en{s}")
+    raw_locales = (os.getenv("LOCALES") or "en,vi,cn").strip()
+    locales = [c.strip() for c in raw_locales.split(",") if c.strip()]
+    for loc in locales:
+        if s and not s.startswith(f"/{loc}/"):
+            out.add(f"/{loc}{s}")
     return out
 
 def _csv_paths(envname: str, defaults: list[str]) -> list[str]:
@@ -65,6 +68,8 @@ _LOGIN_PATHS_RAW = [
     "/signin", "/en/signin",
     "/auth/login", "/en/auth/login",
 ]
+for _lc in [c.strip() for c in (os.getenv("LOCALES") or "").split(",") if c.strip()]:
+    _LOGIN_PATHS_RAW.append(f"/{_lc}/login")
 _LOGIN_PATHS = {_norm(p) for p in _LOGIN_PATHS_RAW if _norm(p)}
 _LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
 
