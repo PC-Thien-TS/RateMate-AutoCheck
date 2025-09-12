@@ -14,5 +14,5 @@ jobs:
       login_path: /login
       register_path: /login
       browsers: "chromium"
-      run_login_success: false
+      run_login_success: true
     secrets: inherit
