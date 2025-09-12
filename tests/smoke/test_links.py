@@ -62,6 +62,8 @@ POST_LOGIN_PAUSE_MS = int(os.getenv("POST_LOGIN_PAUSE_MS", "800"))
 LOGIN_PATH = os.getenv("LOGIN_PATH", "/login")
 ALT_LOGIN_PATH = os.getenv("ALT_LOGIN_PATH", "/en/login")
 LOGIN_VARIANTS = set().union(_variants(LOGIN_PATH), _variants(ALT_LOGIN_PATH))
+for _lc in [c.strip() for c in (os.getenv("LOCALES") or "").split(",") if c.strip()]:
+    LOGIN_VARIANTS.update(_variants(f"/{_lc}/login"))
 
 AUTO_LOGIN = os.getenv("LOGIN_LINKS", "false").lower() in {"1","true","yes"}
 E2E_EMAIL = os.getenv("E2E_EMAIL","")
