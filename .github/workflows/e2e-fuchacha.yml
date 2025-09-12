@@ -1,89 +1,18 @@
 name: E2E (fuchacha)
 
 on:
-  workflow_dispatch:
-    inputs:
-      run_login_success:
-        description: "Run login_success test (true/false)"
-        required: false
-        default: "false"
+  workflow_dispatch: {}
   push:
     branches: [ main ]
 
-concurrency:
-  group: e2e-fuchacha-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  SITE: fuchacha
-  BASE_URL: https://qmtj8pvt-3000.asse.devtunnels.ms
-  LOGIN_PATH: /login/pwd-login
-  REGISTER_PATH: /login/pwd-login
-  RUN_LOGIN_SUCCESS: ${{ github.event.inputs.run_login_success || 'false' }}
-  JUNIT_XML: report/junit.xml
-
 jobs:
-  smoke:
-    name: Smoke (fuchacha · ${{ matrix.browser }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chromium]
-    env:
-      E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
-      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: ${{ runner.os }}-pip-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-ms-playwright-1.55.0
-          restore-keys: ${{ runner.os }}-ms-playwright-
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Install Playwright
-        run: python -m playwright install --with-deps ${{ matrix.browser }}
-      - name: Run smoke tests
-        run: |
-          mkdir -p report test-results
-          EXTRA="smoke and not write"
-          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then EXTRA="$EXTRA and not test_login_success"; fi
-          pytest -vv -m "$EXTRA" tests \
-            --browser=${{ matrix.browser }} \
-            --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-            --junitxml=${{ env.JUNIT_XML }} \
-            --reruns 1 --reruns-delay 1
-      - name: Export coverage summary
-        run: |
-          python tools/export_coverage.py --site "$SITE" --junit "$JUNIT_XML" --out report || true
-      - uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: smoke-artifacts-fuchacha-${{ matrix.browser }}-${{ github.run_number }}
-          path: |
-            report/**
-            test-results/**
-          if-no-files-found: warn
-      - name: Send Telegram report
-        if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python Ci/report_telegram.py || true
+  e2e:
+    uses: ./.github/workflows/e2e-common.yml
+    with:
+      site: fuchacha
+      base_url: https://qmtj8pvt-3000.asse.devtunnels.ms
+      login_path: /login/pwd-login
+      register_path: /login/pwd-login
+      browsers: "chromium"
+      run_login_success: true
+    secrets: inherit
