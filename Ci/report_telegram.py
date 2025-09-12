@@ -349,6 +349,49 @@ def _pretty_test_id(name: str) -> str:
     suffix = (" "+" ".join(tail)) if tail else ""
     return f"{mod}::{fn}{suffix}"
 
+def _simple_message(summary):
+    total = int(summary.get("total", 0))
+    fail_n = int(summary.get("fail", 0))
+    error_n = int(summary.get("error", 0))
+    skip_n = int(summary.get("skip", 0))
+    passed_n = max(total - fail_n - error_n - skip_n, 0)
+
+    ok = (fail_n == 0 and error_n == 0 and total > 0)
+    status = "✅" if ok else "❌" if total > 0 else "⚠️"
+    head = [f"{status} E2E Result: {total} tests | pass={passed_n} fail={fail_n} error={error_n} skip={skip_n}"]
+
+    site = os.getenv("SITE", "")
+    base_url = os.getenv("BASE_URL", "") or os.getenv("BASE_URL_PROD", "")
+    ref = os.getenv("GITHUB_REF_NAME", "") or os.getenv("GITHUB_REF", "")
+    sha = os.getenv("GITHUB_SHA", ""); short_sha = sha[:7] if sha else ""
+    ctx = []
+    if site: ctx.append(f"SITE={site}")
+    if base_url: ctx.append(f"BASE={base_url}")
+    if ref: ctx.append(f"BRANCH={ref}")
+    if short_sha: ctx.append(f"SHA={short_sha}")
+    if ctx:
+        head.append(" · ".join(ctx))
+
+    # List failures/errors (brief)
+    list_limit = 10
+    fails = summary.get("fail_details") or []
+    errors = summary.get("error_details") or []
+    lines = []
+    for it in fails[:list_limit]:
+        lines.append(f"• {_pretty_test_id(it.get('name',''))} — {str(it.get('reason',''))[:160]}")
+    for it in errors[:list_limit]:
+        lines.append(f"• {_pretty_test_id(it.get('name',''))} — {str(it.get('reason',''))[:160]}")
+    if lines:
+        head += ["", "Failed/Errors:", "\n".join(lines)]
+
+    # Link to run
+    server = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    repo = os.getenv("GITHUB_REPOSITORY", "")
+    run_id = os.getenv("GITHUB_RUN_ID", "")
+    if repo and run_id:
+        head += ["", f"Run: {server}/{repo}/actions/runs/{run_id}"]
+    return "\n".join(head)
+
 def _build_message(summary):
     total = int(summary.get("total", 0))
     fail_n = int(summary.get("fail", 0))
@@ -507,7 +550,8 @@ def main():
         s = {"total": 0, "fail": 0, "error": 0, "skip": 0, "duration": 0.0,
              "fails": [], "per_browser": {}, "slow": [],
              "passed": [], "failed": [], "errored": [], "skipped": [], "_junit_src": ""}
-    msg = _build_message(s)
+    simple = (os.getenv("TELEGRAM_SIMPLE") or "").strip().lower() in {"1","true","yes","on"}
+    msg = _simple_message(s) if simple else _build_message(s)
     _send_text(msg)
 
 if __name__ == "__main__":
