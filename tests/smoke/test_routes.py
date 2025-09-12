@@ -1,5 +1,8 @@
 import os
 import re
+import pathlib
+from typing import List, Tuple
+import yaml
 import pytest
 import contextlib
 
@@ -77,8 +80,51 @@ _LOGIN_VARIANTS = set().union(*[_variants(p) for p in _LOGIN_PATHS])
 PUBLIC_DEFAULT = ["/", "/login"]
 PROTECTED_DEFAULT = ["/store"]
 
-PUBLIC_ROUTES = _csv_paths("PUBLIC_ROUTES", PUBLIC_DEFAULT)
-PROTECTED_ROUTES = _csv_paths("PROTECTED_ROUTES", PROTECTED_DEFAULT)
+def _load_routes_from_site_config() -> Tuple[List[str], List[str]]:
+    site = (os.getenv("SITE") or "ratemate").strip()
+    # Per-site file
+    for ext in ("yml", "yaml"):
+        p = pathlib.Path(f"config/sites/{site}.{ext}")
+        if p.is_file():
+            try:
+                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            except Exception:
+                data = {}
+            routes = data.get("routes") or {}
+            if isinstance(routes, dict):
+                pub = routes.get("public") or []
+                pro = routes.get("protected") or []
+                if isinstance(pub, list) or isinstance(pro, list):
+                    return (pub or PUBLIC_DEFAULT, pro or PROTECTED_DEFAULT)
+            elif isinstance(routes, list):
+                return (routes or PUBLIC_DEFAULT, PROTECTED_DEFAULT)
+            break
+    # Aggregated config/sites.yaml
+    for name in ("config/sites.yaml", "config/sites.yml"):
+        p = pathlib.Path(name)
+        if p.is_file():
+            try:
+                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            except Exception:
+                data = {}
+            sites = data.get("sites") or {}
+            cfg = sites.get(site, {}) if isinstance(sites, dict) else {}
+            routes = cfg.get("routes") or {}
+            if isinstance(routes, dict):
+                pub = routes.get("public") or []
+                pro = routes.get("protected") or []
+                if isinstance(pub, list) or isinstance(pro, list):
+                    return (pub or PUBLIC_DEFAULT, pro or PROTECTED_DEFAULT)
+            elif isinstance(routes, list):
+                return (routes or PUBLIC_DEFAULT, PROTECTED_DEFAULT)
+            break
+    # Fallback to ENV/DEFAULT
+    return (
+        _csv_paths("PUBLIC_ROUTES", PUBLIC_DEFAULT),
+        _csv_paths("PROTECTED_ROUTES", PROTECTED_DEFAULT),
+    )
+
+PUBLIC_ROUTES, PROTECTED_ROUTES = _load_routes_from_site_config()
 
 # build test matrix
 CASES = [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] + \
