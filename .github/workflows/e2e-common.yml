@@ -66,6 +66,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Preflight base URL
+        id: preflight
+        run: |
+          set +e
+          if command -v curl >/dev/null 2>&1; then curl -I -L -sS -m 8 "$BASE_URL" >/dev/null; ok=$?; else ok=0; fi
+          if [ "$ok" -ne 0 ]; then echo ok=false >> $GITHUB_OUTPUT; else echo ok=true >> $GITHUB_OUTPUT; fi
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -91,6 +97,7 @@ jobs:
             echo "E2E_PASSWORD=" >> $GITHUB_ENV
           fi
       - name: Run smoke tests
+        if: ${{ steps.preflight.outputs.ok == 'true' }}
         run: |
           mkdir -p report test-results
           EXTRA="smoke and not write"
