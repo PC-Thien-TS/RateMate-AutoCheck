@@ -54,6 +54,7 @@ jobs:
       BASE_URL: ${{ inputs.base_url }}
       LOGIN_PATH: ${{ inputs.login_path }}
       REGISTER_PATH: ${{ inputs.register_path }}
+      ALT_LOGIN_PATH: "/login"
       RUN_LOGIN_SUCCESS: ${{ inputs.run_login_success }}
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
@@ -117,4 +118,3 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python Ci/report_telegram.py || true
-

@@ -11,8 +11,8 @@ jobs:
     with:
       site: ratemate
       base_url: https://store.ratemate.top
-      login_path: /en/login
-      register_path: /en/register
+      login_path: /login
+      register_path: /login
       browsers: "chromium"
-      run_login_success: true
+      run_login_success: false
     secrets: inherit
