@@ -14,7 +14,14 @@ function RunFull {
   mkdir report -ErrorAction SilentlyContinue | Out-Null
   docker run --rm -t --ipc=host --shm-size=1g `
     -v "${PWD}:/app" --env-file .env ratemate-tests bash -lc `
-    "pytest -vv -p pytest_playwright -p pytest_html tests/auth tests/smoke/test_routes.py --browser=chromium --browser=webkit --screenshot=only-on-failure --video=off --tracing=retain-on-failure --excelreport=report/run-$ts.xlsx -o cache_dir=/tmp/pytest_cache --output=/tmp/test-results --reruns 1 --reruns-delay 1"
+    "pytest -vv -p pytest_playwright -p pytest_html tests/auth tests/smoke/test_routes.py `
+      --browser=chromium --browser=webkit `
+      --screenshot=only-on-failure --video=off --tracing=retain-on-failure `
+      --excelreport=report/run-$ts.xlsx `
+      --junitxml=report/junit-$ts.xml `
+      --html=report/report-$ts.html --self-contained-html `
+      -o cache_dir=/tmp/pytest_cache --output=/tmp/test-results `
+      --reruns 1 --reruns-delay 1"
 }
 
 function Smoke {
@@ -22,7 +29,14 @@ function Smoke {
   mkdir report -ErrorAction SilentlyContinue | Out-Null
   docker run --rm -t --ipc=host --shm-size=1g `
     -v "${PWD}:/app" --env-file .env ratemate-tests bash -lc `
-    "pytest -vv -p pytest_playwright -p pytest_html tests/smoke/test_routes.py --browser=chromium --browser=webkit --screenshot=only-on-failure --video=off --tracing=retain-on-failure --excelreport=report/smoke-$ts.xlsx -o cache_dir=/tmp/pytest_cache --output=/tmp/test-results --reruns 1 --reruns-delay 1"
+    "pytest -vv -p pytest_playwright -p pytest_html tests/smoke/test_routes.py `
+      --browser=chromium --browser=webkit `
+      --screenshot=only-on-failure --video=off --tracing=retain-on-failure `
+      --excelreport=report/smoke-$ts.xlsx `
+      --junitxml=report/junit-$ts.xml `
+      --html=report/report-$ts.html --self-contained-html `
+      -o cache_dir=/tmp/pytest_cache --output=/tmp/test-results `
+      --reruns 1 --reruns-delay 1"
 }
 
 function Roles {
@@ -64,4 +78,3 @@ switch ($Target) {
   "secrets-check" { SecretsCheck }
   default { Write-Host "Usage: .\make.ps1 [build|run|smoke|roles|write|discover|secrets-check] [-SITE <site>] [-URL <url>]" }
 }
-
