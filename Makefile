@@ -46,18 +46,26 @@ verify:
 
 run: $(REPORT_DIR)
 	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
-	  bash -lc 'mkdir -p report test-results && pytest $(PYTEST_COMMON) --excelreport=$(RUN_XLSX)'
+	  bash -lc 'mkdir -p report test-results && pytest $(PYTEST_COMMON) \
+	    --excelreport=$(RUN_XLSX) \
+	    --junitxml=$(REPORT_DIR)/junit-$(TS).xml \
+	    --html=$(REPORT_DIR)/report-$(TS).html --self-contained-html'
 
 smoke: $(REPORT_DIR)
 	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
 	  bash -lc "mkdir -p report test-results && pytest -vv tests/auth tests/smoke/test_routes.py \
 	    --browser=chromium --browser=webkit \
 	    --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
-	    --excelreport=$(SMOKE_XLSX)"
+	    --excelreport=$(SMOKE_XLSX) \
+	    --junitxml=$(REPORT_DIR)/junit-$(TS).xml \
+	    --html=$(REPORT_DIR)/report-$(TS).html --self-contained-html"
 
 baseline: $(REPORT_DIR)
 	docker run $(DOCKER_RUN_OPTS) --user 0:0 $(PW_CACHE_MOUNT) $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
-	  bash -lc 'mkdir -p report test-results && pytest $(PYTEST_COMMON) --excelreport=$(BASELINE_XLSX)'
+	  bash -lc 'mkdir -p report test-results && pytest $(PYTEST_COMMON) \
+	    --excelreport=$(BASELINE_XLSX) \
+	    --junitxml=$(REPORT_DIR)/junit-$(TS).xml \
+	    --html=$(REPORT_DIR)/report-$(TS).html --self-contained-html'
 
 clean:
 	rm -rf $(REPORT_DIR) test-results .pytest_cache || true

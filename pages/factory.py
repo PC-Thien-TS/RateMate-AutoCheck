@@ -50,20 +50,18 @@ class PageFactory:
         self.opts = opts
 
     def login(self):
-        # lazy import to avoid circular import at module import time
+        # lazy import để tránh circular imports
         from pages.sites.ratemate.auth_login import LoginPage
         return LoginPage(self.page, self.opts)
 
     def register(self):
-        # if you have a register page, import lazily here
-        with __import__("contextlib").suppress(Exception):
-            try:
-                from pages.sites.ratemate.auth_register import RegisterPage
-                return RegisterPage(self.page, self.opts)
-            except Exception:
-                return None
+        try:
+            from pages.sites.ratemate.auth_register import RegisterPage
+            return RegisterPage(self.page, self.opts)
+        except Exception:
+            return None
 
-    # add other page accessors as needed, all using lazy imports
+    # thêm accessor khác tương tự với lazy import
 
 # Re-export generic pages for convenience imports
 LoginPage = GenericLoginPage

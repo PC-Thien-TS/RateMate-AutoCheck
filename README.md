@@ -2,6 +2,32 @@ Dưới đây là **README.md** mới (đầy đủ, dán đè file cũ):
 
 ---
 
+## Reporting and Test Case Metadata (ASCII)
+
+- HTML report now includes extra columns: Case ID, Title, Browser.
+- JUnit XML includes `case_id`, `case_title`, and `browser` properties.
+- Make/PowerShell targets emit timestamped HTML and JUnit into `report/`.
+
+Annotate tests to enrich reports:
+
+```
+@pytest.mark.tc(id="RM-LOGIN-001", title="Login with valid credentials", area="Auth", severity="High")
+def test_login_success(...):
+    ...
+```
+
+Run examples:
+
+```
+# Linux/macOS/WSL
+make run        # report/report-<ts>.html, report/junit-<ts>.xml
+
+# Windows PowerShell
+./make.ps1 run  # report/report-<ts>.html, report/junit-<ts>.xml
+```
+
+---
+
 # RateMate AutoCheck (E2E)
 
 Bộ kiểm thử end-to-end cho **RateMate Store** (hiện tập trung 1 web: `https://store.ratemate.top`) với hai nhóm tính năng chính **Đăng nhập** và **Đăng ký**.
