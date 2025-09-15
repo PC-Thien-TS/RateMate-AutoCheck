@@ -5,6 +5,7 @@ from typing import List, Tuple
 import yaml
 import pytest
 import contextlib
+from pages.auth.login_page import LoginPage
 
 # ===== helpers =====
 def _norm(p: str) -> str:
@@ -130,6 +131,16 @@ PUBLIC_ROUTES, PROTECTED_ROUTES = _load_routes_from_site_config()
 CASES = [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] + \
         [{"kind": "protected", "path": p} for p in PROTECTED_ROUTES]
 
+# ===== fixtures =====
+@pytest.fixture(scope="session") # Login once per session
+def logged_in_page(new_page, base_url, auth_paths, credentials):
+    login_page = LoginPage(new_page, base_url, auth_paths["login"])
+    login_page.goto()
+    login_page.login(credentials["email"], credentials["password"])
+    # Add assertion to ensure login was successful
+    assert not login_page.is_login_page(), "Login failed in fixture"
+    return new_page
+
 # ===== tests =====
 @pytest.mark.smoke
 @pytest.mark.parametrize("case", CASES, ids=lambda c: f"{c['kind']}:{c['path']}")
@@ -174,3 +185,31 @@ def test_routes_access(new_page, base_url, case):
 
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
 
+# ===== New tests for protected routes after login =====
+PROTECTED_ROUTES_AFTER_LOGIN = [
+    "/en/store",
+    "/en/QR",
+    "/en/category",
+    "/en/product",
+    "/en/feedback",
+    "/en/settings/account",
+]
+
+@pytest.mark.smoke # Mark as smoke to be included in default runs
+@pytest.mark.parametrize("path", PROTECTED_ROUTES_AFTER_LOGIN)
+def test_protected_routes_after_login(logged_in_page, base_url, path):
+    """
+    Tests access to routes that require login after a successful login.
+    """
+    url = f"{base_url}{path}"
+    logged_in_page.set_default_navigation_timeout(TIMEOUT_MS)
+    resp = logged_in_page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    
+    # Assert that we are not redirected to login and status is OK
+    assert not _is_login_like(logged_in_page), f"Redirected to login for {path} after login"
+    assert resp.status < 400, f"Bad status {resp.status} for {path} after login"
+    
+    # Check if the final URL contains the path, or a variant of it (e.g., with locale)
+    final_url_norm = _norm(logged_in_page.url)
+    path_variants = _variants(path)
+    assert any(_norm(v) in final_url_norm for v in path_variants), f"URL mismatch for {path}; final: {logged_in_page.url}"
