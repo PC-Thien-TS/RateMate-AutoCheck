@@ -119,7 +119,7 @@ def site() -> str:
     return (os.getenv("SITE") or "").strip() or "ratemate"
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def base_url(pytestconfig) -> str:
     cli = getattr(pytestconfig.option, "base_url", None)
     if cli:
@@ -132,7 +132,7 @@ def base_url(pytestconfig) -> str:
     return str(env_url).rstrip("/")
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def auth_paths() -> dict:
     return {
         "login": os.environ.get("LOGIN_PATH", "/en/login"),
@@ -140,7 +140,7 @@ def auth_paths() -> dict:
     }
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def credentials() -> dict:
     site_key = (os.getenv("SITE") or "ratemate").strip().upper()
 
