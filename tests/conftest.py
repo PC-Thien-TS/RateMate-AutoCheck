@@ -6,12 +6,41 @@ from _fixtures.roles import *  # noqa
 
 
 def pytest_collection_modifyitems(items):
-    """Attach test case metadata (from @pytest.mark.tc) into JUnit properties.
-
-    Usage in tests:
-        @pytest.mark.tc(id="RM-LOGIN-001", title="Login success", area="Auth", severity="High")
-        def test_login_success(...): ...
     """
+    - Filter collected tests based on SITE environment variable.
+    - Attach test case metadata (from @pytest.mark.tc) into JUnit properties.
+    """
+    # --- Site-specific test filtering ---
+    current_site = os.getenv("SITE")
+    if current_site:
+        # A test is considered site-specific if its path contains a keyword like
+        # /test_fuchacha_ or /testratemateapp2
+        SITES = ["fuchacha", "ratemate", "ratemate_app2", "ratemate1", "ratemate2"]
+        
+        filtered_items = []
+        for item in items:
+            # Normalize path for consistent matching
+            path_str = str(item.path).lower().replace("_", "").replace("\\", "/")
+            
+            is_site_specific = False
+            for site_keyword in SITES:
+                # Check for patterns like 'test/fuchacha' or 'testratemate2'
+                normalized_keyword = site_keyword.lower().replace("_", "")
+                if f"test{normalized_keyword}" in path_str:
+                    is_site_specific = True
+                    # If it belongs to the *current* site, keep it
+                    if normalized_keyword == current_site.lower().replace("_", ""):
+                        filtered_items.append(item)
+                    # If it belongs to a *different* site, drop it.
+                    break
+            
+            # If the test is not specific to any site, keep it (e.g., generic auth tests)
+            if not is_site_specific:
+                filtered_items.append(item)
+                
+        items[:] = filtered_items
+
+    # --- JUnit property attachment (runs on the filtered list) ---
     for item in items:
         try:
             mark = item.get_closest_marker("tc")
@@ -31,6 +60,7 @@ def pytest_collection_modifyitems(items):
                 props.append((str(k), str(v)))  # type: ignore[attr-defined]
         except Exception:
             pass
+
 
 
 # ---------------- Enhanced reporting (HTML/JUnit metadata) ----------------

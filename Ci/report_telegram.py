@@ -253,25 +253,25 @@ def _build_message(summary):
         return "\n".join(lines)
 
     if failed:
-        blocks.append("\n❌ *Failed Tests:*")
+        blocks.append("\n❌ Failed Tests:")
         blocks.append(format_test_list(failed, show_reason=True))
     
     if errored:
-        blocks.append("\n💥 *Errored Tests:*")
+        blocks.append("\n💥 Errored Tests:")
         blocks.append(format_test_list(errored, show_reason=True))
 
     if skipped:
-        blocks.append("\n⚠️ *Skipped Tests:*")
+        blocks.append("\n⚠️ Skipped Tests:")
         blocks.append(format_test_list(skipped, show_reason=True))
 
     show_passed = _bool_env("TELEGRAM_SHOW_PASSED", False)
     if passed and show_passed:
-        blocks.append("\n✅ *Passed Tests:*")
+        blocks.append("\n✅ Passed Tests:")
         blocks.append(format_test_list(passed))
 
     slow = summary.get("slow") or []
     if slow:
-        blocks.append("\n🐌 *Slowest tests (top 5):*")
+        blocks.append("\n🐌 Slowest tests (top 5):")
         for t, full in slow[:5]:
             blocks.append(f"- {_fmt_duration(t)} — {_pretty_test_id(full)}")
 
@@ -303,7 +303,7 @@ def _send_text(text):
     for chat in chat_ids:
         sent = 0
         for idx, body in enumerate(parts, 1):
-            data = {"chat_id": chat, "text": body, "disable_web_page_preview": True, "parse_mode": "Markdown"}
+            data = {"chat_id": chat, "text": body, "disable_web_page_preview": True}
             print(f"[telegram] Sending chunk {idx}/{len(parts)} to {chat}...")
             try:
                 r = requests.post(
