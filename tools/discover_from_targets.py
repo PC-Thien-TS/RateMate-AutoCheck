@@ -31,12 +31,12 @@ def sh(args: list[str], cwd: str | None = None, env: dict[str, str] | None = Non
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--file", default="config/discover/targets.yml")
-    ap.add_argument("--emit-tests", action="store_true", default=True)
-    ap.add_argument("--emit-yaml", action="store_true", default=True)
-    ap.add_argument("--run-tests", action="store_true", default=True)
-    ap.add_argument("--workdir", default=".")
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--file", default="config/discover/targets.yml", help="YAML file listing discovery targets")
+    ap.add_argument("--emit-tests", action="store_true", default=True, help="Generate pytest modules for each site")
+    ap.add_argument("--emit-yaml", action="store_true", default=True, help="Write discovered data to config/discovered/")
+    ap.add_argument("--run-tests", action="store_true", default=True, help="Run generated tests after discovery")
+    ap.add_argument("--workdir", default=".", help="Working directory for commands")
     args = ap.parse_args(argv)
 
     p = Path(args.file)

@@ -224,6 +224,40 @@ pytest -m auth  --browser=chromium
 
 ---
 
+## Utilities
+
+Tập hợp các script nhỏ hỗ trợ khám phá và báo cáo.
+
+- **debug\_probe.py** – in nhanh các input, button, link trên một trang để phục vụ debug.
+
+  ```bash
+  python tools/debug_probe.py --base https://host --path /login
+  ```
+
+- **discover\_routes.py** – crawler nhẹ để phát hiện route công khai/bảo vệ và có thể sinh test.
+
+  ```bash
+  python tools/discover_routes.py --url https://host/login --emit-tests
+  ```
+
+  Xem thêm [docs/discovery.md](docs/discovery.md) để biết chi tiết quy trình.
+
+- **discover\_from\_targets.py** – chạy auto-discover cho nhiều site từ file YAML và thực thi test sinh ra.
+
+  ```bash
+  python tools/discover_from_targets.py --file config/discover/targets.yml
+  ```
+
+- **export\_coverage.py** – tổng hợp kết quả test và xuất báo cáo coverage.
+
+  ```bash
+  python tools/export_coverage.py --site ratemate --junit report/junit.xml --out report
+  ```
+
+Xem thư mục `docs/tools/` nếu cần mô tả chi tiết hơn cho từng tiện ích.
+
+---
+
 ## 8) Tùy chọn đa trình duyệt
 
 Chromium là mặc định để nhanh và ổn định.
