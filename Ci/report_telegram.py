@@ -26,7 +26,7 @@ def _fmt_duration(sec):
 def _extract_browser(name: str) -> str | None:
     if not name:
         return None
-    m = re.search(r"\\[([^\\]+)\\]", name)
+    m = re.search(r"\[([^\[\]]+)\]", name)
     if not m:
         return None
     token = m.group(1)
@@ -183,6 +183,7 @@ def _build_header(summary):
     fail = int(summary.get("fail", 0))
     error = int(summary.get("error", 0))
     skip = int(summary.get("skip", 0))
+    dur = float(summary.get("duration", 0.0))
     passed = max(total - fail - error - skip, 0)
     ok = (fail == 0 and error == 0 and total > 0)
     status = "✅" if ok else "❌" if total > 0 else "⚠️"
@@ -295,7 +296,7 @@ def _fmt_suite_counts(summary):
     if not buckets:
         return ""
     order = ["auth", "smoke", "i18n"] + sorted([k for k in buckets.keys() if k not in {"auth","smoke","i18n"}])
-    parts = [f"{k.capitalize()}({buckets[k]})") for k in order if k in buckets]
+    parts = [f"{k.capitalize()}({buckets[k]})" for k in order if k in buckets]
     return "Suites: " + ", ".join(parts)
 
 

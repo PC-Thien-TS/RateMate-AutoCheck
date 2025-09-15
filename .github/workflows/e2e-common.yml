@@ -107,7 +107,6 @@ jobs:
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
             --junitxml=${{ env.JUNIT_XML }} \
             --html=report/report.html --self-contained-html \
-            --excelreport=report/run.xlsx \
             --reruns 1 --reruns-delay 1
       - name: Export coverage summary
         run: |
