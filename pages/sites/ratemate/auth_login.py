@@ -11,7 +11,7 @@ from playwright.sync_api import Page, Locator, TimeoutError, Error as Playwright
 from pages.core.base_page import BasePage
 from pages.factory import PageFactory
 
-from pages.sites.ratemate.auth_login import LoginResult  # keep import to use type/result
+from pages.auth.login_page import LoginResult
 
 _ERR_RE = re.compile(r"(incorrect|not\s*valid|invalid|wrong|failed|error|required)", re.I)
 
@@ -27,14 +27,6 @@ def _union_error(scope):
     for g in groups[1:]:
         loc = loc.or_(scope.locator("css=" + g))
     return loc
-
-
-@dataclass
-class LoginResult:
-    status: Optional[int] = None
-    final_url: Optional[str] = None
-    error: Optional[str] = None
-    body: Optional[str] = None
 
 
 class LoginPage(BasePage):
