@@ -162,7 +162,7 @@ def _md_table(rows: list[list[str]]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--site", help="Site key (used to read discovered JSON)")
     ap.add_argument("--junit", help="Path to JUnit XML (default: search report/*.xml)")
     ap.add_argument("--out", default="report", help="Output directory (default: report)")
