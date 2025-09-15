@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.0
+    hooks:
+      - id: flake8
+  - repo: local
+    hooks:
+      - id: pytest-collect-only
+        name: pytest --collect-only
+        entry: pytest --collect-only
+        language: system
+        pass_filenames: false
