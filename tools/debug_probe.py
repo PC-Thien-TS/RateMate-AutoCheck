@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""Quickly inspect a page for form inputs, buttons and links."""
+
+from __future__ import annotations
+
+import argparse
+import os
+
 from playwright.sync_api import sync_playwright
 
 
-def main(base: str, path: str = "/") -> int:
+def probe(base: str, path: str = "/") -> int:
     with sync_playwright() as pw:
         b = pw.chromium.launch()
         ctx = b.new_context()
@@ -80,11 +87,18 @@ def main(base: str, path: str = "/") -> int:
     return 0
 
 
-if __name__ == "__main__":
-    import os, sys
-    base = os.getenv("BASE_URL") or (sys.argv[1] if len(sys.argv) > 1 else "")
-    path = os.getenv("LOGIN_PATH") or (sys.argv[2] if len(sys.argv) > 2 else "/")
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--base", help="Base URL to open (env: BASE_URL)")
+    ap.add_argument("--path", default="/", help="Path to append to base (env: LOGIN_PATH)")
+    args = ap.parse_args(argv)
+
+    base = args.base or os.getenv("BASE_URL") or ""
+    path = args.path or os.getenv("LOGIN_PATH") or "/"
     if not base:
-        print("Usage: BASE_URL=https://host LOGIN_PATH=/en/login python tools/debug_probe.py")
-        sys.exit(2)
-    raise SystemExit(main(base, path))
+        ap.error("BASE_URL or --base is required")
+    return probe(base, path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

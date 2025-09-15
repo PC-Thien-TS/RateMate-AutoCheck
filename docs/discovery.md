@@ -15,6 +15,23 @@ Docker Makefile target
 - make discover URL=https://host/login
 - SITE=<site> pytest -vv tests/smoke/test_routes.py --browser=chromium
 
+Flow diagram
+------------
+
+```mermaid
+flowchart TD
+    A[Start URL or base/start] --> B{Login first?}
+    B -->|yes| C[Attempt login]
+    B -->|no| D[Begin crawl]
+    C --> D
+    D --> E[Collect links]
+    E --> F[Classify public/protected]
+    F --> G{Emit tests?}
+    G -->|yes| H[Write pytest module]
+    G -->|no| I[Write JSON/YAML]
+    H --> I
+```
+
 Notes
 
 - If E2E_EMAIL/E2E_PASSWORD are set, the tool attempts a single login to better classify protected routes.

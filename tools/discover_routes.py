@@ -165,7 +165,7 @@ def test_protected_routes_behavior(new_page, site, base_url, path):
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--url", help="Full start URL (infers base + start)")
     ap.add_argument("--base", help="Base URL (e.g., https://host)")
     ap.add_argument("--start", help="Start path (e.g., /login)")
