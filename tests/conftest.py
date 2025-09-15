@@ -59,7 +59,7 @@ def _tc_info(item) -> Tuple[str, str]:
 
 def _browser_from_nodeid(nodeid: str) -> str:
     try:
-        m = re.search(r"\[([^\]]+)\]", nodeid or "")
+        m = re.search(r"[^\]]+", nodeid or "")
         token = (m.group(1) if m else "").split("-", 1)[0].strip().lower()
         return token if token in ("chromium", "firefox", "webkit") else ""
     except Exception:
@@ -108,6 +108,7 @@ import pytest as _pytest  # local alias to avoid confusion
 def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
+    rep.item = item  # Attach item to report for other hooks
     try:
         cid, title = _tc_info(item)
         rep.case_id = cid  # for pytest-html table row
@@ -144,3 +145,73 @@ def pytest_html_results_table_row(report, cells):  # type: ignore[func-returns-v
     cells.insert(1, html.td(cid))
     cells.insert(2, html.td(title))
     cells.insert(3, html.td(browser))
+
+# ----------------- Custom Excel Report (pytest-excel) -----------------
+
+def _parse_docstring(doc: str) -> dict:
+    """Parses a structured docstring to extract report fields."""
+    if not doc:
+        return {}
+    
+    doc = doc.strip()
+    lines = doc.splitlines()
+    
+    data = {}
+    current_key = None
+    current_content = []
+
+    # These are the headers the parser will look for in the docstring
+    key_map = {
+        "precondition:": "precondition",
+        "test steps:": "test_steps",
+        "expected result:": "expected_result",
+    }
+
+    for line in lines:
+        line_lower = line.strip().lower()
+        if line_lower in key_map:
+            if current_key:
+                data[current_key] = "\n".join(current_content).strip()
+            
+            current_key = key_map[line_lower]
+            current_content = []
+        elif current_key:
+            current_content.append(line.strip())
+
+    if current_key:
+        data[current_key] = "\n".join(current_content).strip()
+        
+    return data
+
+# This hook is used to add new headers to the Excel report
+def pytest_excel_results_table_header(cells):
+    """Add custom columns to the Excel report header."""
+    cells.insert(1, "Test Case ID")
+    cells.insert(2, "Title")
+    cells.insert(3, "Precondition")
+    cells.insert(4, "Test Steps")
+    cells.insert(5, "Expected Result")
+
+# This hook is used to add data to each test row
+def pytest_excel_results_table_row(report, cells):
+    """Add custom data to each row in the Excel report."""
+    item = getattr(report, 'item', None)
+    if not item:
+        # Insert empty cells if item is not available
+        for _ in range(5): cells.insert(1, "")
+        return
+
+    # 1. Get Test Case ID and Title from the marker using existing helper
+    cid, title = _tc_info(item)
+
+    # 2. Get Precondition, Steps, Expected Result from docstring
+    docstring_data = _parse_docstring(item.obj.__doc__ if hasattr(item, 'obj') and item.obj.__doc__ else '')
+    precondition = docstring_data.get("precondition", "")
+    test_steps = docstring_data.get("test_steps", "")
+    expected_result = docstring_data.get("expected_result", "")
+
+    cells.insert(1, cid)
+    cells.insert(2, title)
+    cells.insert(3, precondition)
+    cells.insert(4, test_steps)
+    cells.insert(5, expected_result)

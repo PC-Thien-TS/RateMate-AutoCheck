@@ -26,7 +26,7 @@ def _fmt_duration(sec):
 def _extract_browser(name: str) -> str | None:
     if not name:
         return None
-    m = re.search(r"\[([^\]]+)\]", name)
+    m = re.search(r"\\[([^\\]+)\\]", name)
     if not m:
         return None
     token = m.group(1)
@@ -41,7 +41,7 @@ def _prepare_proxies():
         px = "http://" + px
     return {"http": px, "https": px}
 
-# ---------- JUnit parsing ----------
+# ---------- File Finders ----------
 
 def _find_junit():
     p_env = (os.getenv("JUNIT_XML") or "").strip()
@@ -56,6 +56,21 @@ def _find_junit():
         except Exception:
             continue
     return p_env or ""
+
+def _find_excel_report():
+    """Finds the pytest-excel report file."""
+    # The path is predictable from the workflow file
+    path = "report/run.xlsx"
+    if pathlib.Path(path).is_file():
+        return path
+    
+    # Fallback to searching glob, just in case
+    cands = sorted(glob.glob("report/*.xlsx"), key=lambda p: pathlib.Path(p).stat().st_mtime, reverse=True)
+    if cands:
+        return cands[0]
+    return None
+
+# ---------- JUnit parsing ----------
 
 def _collect_suites(root):
     return [root] if root.tag.endswith("testsuite") else list(root.findall(".//testsuite"))
@@ -107,9 +122,7 @@ def _parse_junit_any(path):
                 status = "error"
                 error += 1
                 msg  = (er.get("message") or "").strip() or (er.text or "").strip() or "No message"
-                # legacy combined list
                 fails.append({"name": full_name, "reason": msg[:400]})
-                # detailed bucket
                 error_details.append({"name": full_name, "reason": msg[:400]})
                 errored.append((full_name, ttime))
             elif fe is not None:
@@ -118,8 +131,6 @@ def _parse_junit_any(path):
                 msg  = (fe.get("message") or "").strip() or (fe.text or "").strip() or "No message"
                 fails.append({"name": full_name, "reason": msg[:400]})
                 fail_details.append({"name": full_name, "reason": msg[:400]})
-                passed  # just to keep linter happy
-                # Note: fail list already captured; also track in failed bucket
             elif sk is not None:
                 status = "skip"
                 skip += 1
@@ -172,7 +183,6 @@ def _build_header(summary):
     fail = int(summary.get("fail", 0))
     error = int(summary.get("error", 0))
     skip = int(summary.get("skip", 0))
-    dur = float(summary.get("duration", 0.0))
     passed = max(total - fail - error - skip, 0)
     ok = (fail == 0 and error == 0 and total > 0)
     status = "✅" if ok else "❌" if total > 0 else "⚠️"
@@ -229,7 +239,7 @@ def _build_browser_breakdown(summary):
     if not per:
         return ""
     lines = ["", "Per-browser:"]
-    for b in ("chromium", "firefox", "webkit"):
+    for b in ("chromium","firefox","webkit"):
         if b in per:
             t = per[b].get("total", 0)
             f = per[b].get("fail", 0)
@@ -256,7 +266,6 @@ def _bool_env(name: str, default: bool = False) -> bool:
 
 
 def _suite_key(test_name: str) -> str:
-    # tests.auth.test_login.test_login_success[chromium] -> auth
     base = (test_name or "").split("[", 1)[0]
     parts = base.split(".")
     return parts[1] if len(parts) > 1 and parts[0] == "tests" else (parts[0] if parts else "")
@@ -285,9 +294,8 @@ def _fmt_suite_counts(summary):
     buckets = _collect_suite_counts(summary)
     if not buckets:
         return ""
-    # stable order: auth, smoke, i18n, then others
     order = ["auth", "smoke", "i18n"] + sorted([k for k in buckets.keys() if k not in {"auth","smoke","i18n"}])
-    parts = [f"{k.capitalize()}({buckets[k]})" for k in order if k in buckets]
+    parts = [f"{k.capitalize()}({buckets[k]})") for k in order if k in buckets]
     return "Suites: " + ", ".join(parts)
 
 
@@ -318,12 +326,6 @@ def _bullets_limited(rows, limit=20, transform=None):
 
 
 def _pretty_test_id(name: str) -> str:
-    """Make pytest nodeid more readable.
-
-    examples:
-      tests.auth.test_login.test_login_success[chromium] -> auth/test_login::test_login_success [chromium]
-      tests.smoke.test_links.test_open_links_ok[chromium-/en/login] -> smoke/test_links::test_open_links_ok [/en/login] (chromium)
-    """
     if not name:
         return name
     base, br = (name.split("[", 1) + [""])[:2]
@@ -336,7 +338,6 @@ def _pretty_test_id(name: str) -> str:
     browser = None
     param = None
     if br:
-        # browser may be first token before '-' in bracket
         if "-" in br:
             browser, param = br.split("-", 1)
         else:
@@ -346,7 +347,7 @@ def _pretty_test_id(name: str) -> str:
         tail.append(f"[{param}]")
     if browser:
         tail.append(f"({browser})")
-    suffix = (" "+" ".join(tail)) if tail else ""
+    suffix = (" " + " ".join(tail)) if tail else ""
     return f"{mod}::{fn}{suffix}"
 
 def _simple_message(summary):
@@ -372,7 +373,6 @@ def _simple_message(summary):
     if ctx:
         head.append(" · ".join(ctx))
 
-    # List failures/errors (brief)
     list_limit = 10
     fails = summary.get("fail_details") or []
     errors = summary.get("error_details") or []
@@ -384,13 +384,13 @@ def _simple_message(summary):
     if lines:
         head += ["", "Failed/Errors:", "\n".join(lines)]
 
-    # Link to run
     server = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     repo = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "")
     if repo and run_id:
         head += ["", f"Run: {server}/{repo}/actions/runs/{run_id}"]
     return "\n".join(head)
+
 
 def _build_message(summary):
     total = int(summary.get("total", 0))
@@ -399,7 +399,6 @@ def _build_message(summary):
     skip_n = int(summary.get("skip", 0))
     passed_n = max(total - fail_n - error_n - skip_n, 0)
 
-    # Controls
     list_limit = _list_limit_from_env("TELEGRAM_LIST_LIMIT", 20)
     show_passed = _bool_env("TELEGRAM_SHOW_PASSED", False)
     show_skipped = _bool_env("TELEGRAM_SHOW_SKIPPED", True)
@@ -409,7 +408,6 @@ def _build_message(summary):
     errored = summary.get("errored") or []
     skipped = summary.get("skipped") or []
 
-    # Optional details (reasons)
     fail_details  = summary.get("fail_details")  or []
     error_details = summary.get("error_details") or []
     skipped_details = summary.get("skipped_details") or []
@@ -418,7 +416,6 @@ def _build_message(summary):
         _build_header(summary),
     ]
 
-    # Short context line
     show_context = _bool_env("TELEGRAM_SHOW_CONTEXT", True)
     suites = _fmt_suite_counts(summary)
     browsers = _browsers_used(summary)
@@ -427,14 +424,12 @@ def _build_message(summary):
         if ctx_line:
             blocks += [ctx_line]
 
-    # Quick totals line
     blocks += [f"Totals: pass={passed_n} fail={fail_n} error={error_n} skip={skip_n}"]
 
-    # Problems first
     privacy = _bool_env("TELEGRAM_PRIVACY", False) or _bool_env("TELEGRAM_COMPACT", False)
     if not privacy:
         if fail_details:
-            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in fail_details[:list_limit]]
+            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','_')[:200]}" for it in fail_details[:list_limit]]
             more = max(len(fail_details) - min(len(fail_details), list_limit), 0)
             if more:
                 lines.append(f"(+{more} more)")
@@ -443,7 +438,7 @@ def _build_message(summary):
             blocks += ["", "❌ Failed:", _bullets_limited(failed, list_limit, _pretty_test_id)]
 
         if error_details:
-            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in error_details[:list_limit]]
+            lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','_')[:200]}" for it in error_details[:list_limit]]
             more = max(len(error_details) - min(len(error_details), list_limit), 0)
             if more:
                 lines.append(f"(+{more} more)")
@@ -451,10 +446,9 @@ def _build_message(summary):
         elif errored:
             blocks += ["", "💥 Errors:", _bullets_limited(errored, list_limit, _pretty_test_id)]
 
-        # Skipped (optional)
         if skip_n and show_skipped:
             if skipped_details:
-                lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','')[:200]}" for it in skipped_details[:list_limit]]
+                lines = [f"• {_pretty_test_id(it.get('name',''))} — {it.get('reason','_')[:200]}" for it in skipped_details[:list_limit]]
                 more = max(len(skipped_details) - min(len(skipped_details), list_limit), 0)
                 if more:
                     lines.append(f"(+{more} more)")
@@ -462,24 +456,20 @@ def _build_message(summary):
             else:
                 blocks += ["", "⚠️ Skipped:", _bullets_limited(skipped, list_limit, _pretty_test_id)]
 
-        # Passed (show only if requested or short list)
         if passed and (show_passed or len(passed) <= list_limit):
             blocks += ["", f"✅ Passed (top {list_limit}):", _bullets_limited(passed, list_limit, _pretty_test_id)]
 
-    # Breakdown + slowest
     show_breakdown = _bool_env("TELEGRAM_SHOW_BREAKDOWN", True)
     br = _build_browser_breakdown(summary)
     if br and show_breakdown:
         blocks += ["", br]
     slow = summary.get("slow") or []
-    # Hide slowest details in privacy/compact mode
     if slow and not ( _bool_env("TELEGRAM_PRIVACY", False) or _bool_env("TELEGRAM_COMPACT", False) ):
         blocks += [
             "",
             "Slowest tests (top 5):",
         ] + [f"- {_pretty_test_id(full)} — {_fmt_duration(t)}" for t, full in slow[:5]]
 
-    # Zero-tests diagnostics to guide debugging
     if total == 0:
         try:
             import glob, pathlib
@@ -506,7 +496,7 @@ def _send_text(text):
     import requests
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_env = os.environ["TELEGRAM_CHAT_ID"]
-    chat_ids = [c.strip() for c in re.split(r"[,\s]+", chat_env) if c.strip()]
+    chat_ids = [c.strip() for c in re.split(r"[,\\s]+", chat_env) if c.strip()]
     proxies = _prepare_proxies()
 
     print("\n===== Telegram message preview =====\n")
@@ -520,7 +510,7 @@ def _send_text(text):
         sent = 0
         for idx, body in enumerate(parts, 1):
             data = {"chat_id": chat, "text": body, "disable_web_page_preview": True}
-            print(f"[telegram] Sending chunk {idx}/{len(parts)} to {chat} with proxy...")
+            print(f"[telegram] Sending chunk {idx}/{len(parts)} to {chat}...")
             try:
                 r = requests.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
@@ -533,7 +523,7 @@ def _send_text(text):
                 print(f"[telegram] Proxy send failed for chunk {idx}: {e}")
                 print("[telegram] Retrying direct (without proxy)...")
                 with requests.Session() as s:
-                    s.trust_env = False # Vô hiệu hóa proxy từ môi trường cho request này
+                    s.trust_env = False
                     r = s.post(
                         f"https://api.telegram.org/bot{token}/sendMessage",
                         data=data, timeout=60, proxies={}
@@ -543,6 +533,54 @@ def _send_text(text):
                     sent += 1
         print(f"Telegram sent OK to {chat} ({sent}/{len(parts)} chunks).")
 
+def _send_document(file_path, caption=""):
+    """Sends a document to Telegram."""
+    import requests
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    chat_env = os.environ["TELEGRAM_CHAT_ID"]
+    chat_ids = [c.strip() for c in re.split(r"[,\\s]+", chat_env) if c.strip()]
+    proxies = _prepare_proxies()
+
+    print(f"\n===== Telegram document: {file_path} =====\n")
+    # Caption has a 1024 char limit, truncate if necessary
+    if len(caption) > 1024:
+        print("(caption truncated)")
+        caption = caption[:1020] + "..."
+    print(caption)
+    print()
+
+    for chat in chat_ids:
+        print(f"[telegram] Sending document {file_path} to {chat}...")
+        with open(file_path, "rb") as f:
+            files = {"document": f}
+            data = {"chat_id": chat, "caption": caption}
+            
+            try:
+                r = requests.post(
+                    f"https://api.telegram.org/bot{token}/sendDocument",
+                    data=data,
+                    files=files,
+                    timeout=60,
+                    proxies=proxies
+                )
+                r.raise_for_status()
+                print(f"[telegram] Document sent successfully to {chat} with proxy.")
+            except Exception as e:
+                print(f"[telegram] Proxy send failed for document: {e}")
+                print("[telegram] Retrying direct (without proxy)...")
+                f.seek(0)
+                with requests.Session() as s:
+                    s.trust_env = False
+                    r = s.post(
+                        f"https://api.telegram.org/bot{token}/sendDocument",
+                        data=data,
+                        files=files,
+                        timeout=120,
+                        proxies={}
+                    )
+                    r.raise_for_status()
+                    print(f"[telegram] Document sent successfully to {chat} via direct connection.")
+
 def main():
     s = _load_summary()
     if not s:
@@ -550,9 +588,22 @@ def main():
         s = {"total": 0, "fail": 0, "error": 0, "skip": 0, "duration": 0.0,
              "fails": [], "per_browser": {}, "slow": [],
              "passed": [], "failed": [], "errored": [], "skipped": [], "_junit_src": ""}
+    
     simple = (os.getenv("TELEGRAM_SIMPLE") or "").strip().lower() in {"1","true","yes","on"}
     msg = _simple_message(s) if simple else _build_message(s)
-    _send_text(msg)
+
+    excel_report_path = _find_excel_report()
+
+    if excel_report_path:
+        try:
+            _send_document(excel_report_path, caption=msg)
+        except Exception as e:
+            print(f"[telegram] CRITICAL: Failed to send document: {e}")
+            print("[telegram] Falling back to sending text message only.")
+            _send_text(msg)
+    else:
+        print("[report] NOTE: No Excel report found. Sending text message only.")
+        _send_text(msg)
 
 if __name__ == "__main__":
     main()
