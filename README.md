@@ -94,6 +94,11 @@ cp .env.example .env
 
 # 4) (Tùy chọn) Build Docker image
 make build
+
+# 5) Thiết lập pre-commit (format + lint)
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
 ```
 
 > **Ghi chú về config:**
@@ -233,6 +238,7 @@ pytest -vv tests --browser=chromium --browser=webkit --browser=firefox
 ## 9) CI/CD (GitHub Actions)
 
 Workflow mẫu nằm tại: `.github/workflows/e2e.yml`.
+Workflow này có bước `pre-commit run --all-files` để kiểm tra định dạng và lint trước khi chạy test.
 Khuyến nghị:
 
 * Job chính dùng **Chromium** (nhanh)
