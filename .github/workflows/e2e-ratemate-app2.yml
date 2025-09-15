@@ -15,4 +15,5 @@ jobs:
       register_path: /en/login
       browsers: "chromium"
       run_login_success: false
+      pytest_marker: 'smoke'
     secrets: inherit

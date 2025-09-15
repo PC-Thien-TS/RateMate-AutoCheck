@@ -5,6 +5,7 @@ from typing import List, Tuple
 import yaml
 import pytest
 import contextlib
+from pages.auth.login_page import LoginPage
 
 # ===== helpers =====
 def _norm(p: str) -> str:
@@ -13,6 +14,7 @@ def _norm(p: str) -> str:
         return ""
     if not s.startswith("/"):
         s = "/" + s
+    # trim trailing slashes
     return re.sub(r"/+$", "", s)
 
 def _variants(path: str):
@@ -26,7 +28,7 @@ def _variants(path: str):
             out.add(f"/{loc}{s}")
     return out
 
-def _csv_paths(envname: str, defaults: list[str]) -> list[str]:
+def _csv_paths(envname: str, defaults: List[str]) -> List[str]:
     raw = (os.getenv(envname) or "").strip()
     if not raw:
         items = defaults
@@ -130,6 +132,52 @@ PUBLIC_ROUTES, PROTECTED_ROUTES = _load_routes_from_site_config()
 CASES = [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] + \
         [{"kind": "protected", "path": p} for p in PROTECTED_ROUTES]
 
+# ===== fixtures =====
+@pytest.fixture(scope="function")
+def logged_in_page(new_page, base_url, auth_paths, credentials):
+    """Logs in and returns the page, ready for action."""
+    lp = LoginPage(new_page, base_url, auth_paths["login"])
+    lp.goto()
+    lp.login(credentials.get("email", ""), credentials.get("password", ""))
+    with contextlib.suppress(Exception):
+        new_page.wait_for_load_state("domcontentloaded", timeout=8_000)
+        new_page.wait_for_timeout(250)
+    return new_page
+
+@pytest.mark.smoke  # Mark as smoke to be included in default runs
+@pytest.mark.parametrize("path", [
+    "/en/store",
+    "/en/QR",
+    "/en/category",
+    "/en/product",
+    "/en/feedback",
+    "/en/settings/account",
+])
+def test_protected_routes_after_login(logged_in_page, base_url, path):
+    """After successful login, protected routes should be accessible."""
+    new_page = logged_in_page
+    # Go to the protected path
+    url = f"{base_url}{path}"
+    new_page.set_default_navigation_timeout(TIMEOUT_MS)
+    resp = new_page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    with contextlib.suppress(Exception):
+        new_page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_MS)
+        new_page.wait_for_timeout(150)
+
+    # Assert that we are not shown a login-like UI
+    assert not _is_login_like(new_page), f"Redirected to login for {path} after login"
+
+    # Status should be OK if provided by Playwright (some navigations may return None)
+    status = getattr(resp, "status", None) if resp else None
+    assert status is None or status < 400, f"Bad status {status} for {path} after login"
+
+    # Final URL should include the path (or its locale variants)
+    final_url_norm = _norm(new_page.url)
+    path_variants = _variants(path)
+    assert any(_norm(v) in final_url_norm for v in path_variants), (
+        f"URL mismatch for {path}; final: {new_page.url}"
+    )
+
 # ===== tests =====
 @pytest.mark.smoke
 @pytest.mark.parametrize("case", CASES, ids=lambda c: f"{c['kind']}:{c['path']}")
@@ -174,3 +222,4 @@ def test_routes_access(new_page, base_url, case):
 
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
 
+    # Note: Additional assertions may be added per-site if needed
