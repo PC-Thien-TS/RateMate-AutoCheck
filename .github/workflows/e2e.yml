@@ -109,6 +109,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Run pre-commit
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
       - name: Install Playwright
         working-directory: ${{ env.WORKDIR }}
         run: python -m playwright install --with-deps ${{ matrix.browser }}
@@ -188,6 +193,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Run pre-commit
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
       - name: Install Playwright
         run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Run role tests (skip if missing creds)
@@ -255,6 +264,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Run pre-commit
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
       - name: Install Playwright
         run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Run write tests
@@ -311,6 +324,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Run pre-commit
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
       - name: Install Playwright
         run: python -m playwright install --with-deps chromium
       - name: Discover URLs and generate tests
