@@ -197,7 +197,7 @@ def test_routes_access(new_page, base_url, case):
         new_page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_MS)
     final_url = new_page.url
 
-    is__final_login = any(re.search(re.escape(v), final_url) for v in _LOGIN_VARIANTS)
+    is_final_login = any(re.search(re.escape(v), final_url) for v in _LOGIN_VARIANTS)
     is_target_login = path in _LOGIN_PATHS or path in _LOGIN_VARIANTS
 
     if case["kind"] == "public":
