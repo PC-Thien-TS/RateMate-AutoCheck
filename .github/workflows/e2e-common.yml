@@ -30,6 +30,11 @@ on:
         required: false
         default: false
         type: boolean
+      pytest_marker:
+        description: Pytest marker expression to select tests
+        required: false
+        default: 'smoke and not write'
+        type: string
     secrets:
       E2E_EMAIL:
         required: false
@@ -42,7 +47,7 @@ on:
 
 jobs:
   smoke:
-    name: Smoke (${{ inputs.site }} · ${{ matrix.browser }})
+    name: Test (${{ inputs.site }} · ${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -92,16 +97,16 @@ jobs:
         run: python -m playwright install --with-deps ${{ matrix.browser }}
       - name: Unset creds when not running login
         run: |
-          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then
+          if [ "${{ inputs.run_login_success }}" != "true" ]; then
             echo "E2E_EMAIL=" >> $GITHUB_ENV
             echo "E2E_PASSWORD=" >> $GITHUB_ENV
           fi
-      - name: Run smoke tests
+      - name: Run tests
         if: ${{ steps.preflight.outputs.ok == 'true' }}
         run: |
           mkdir -p report test-results
-          EXTRA="smoke and not write"
-          if [ "${RUN_LOGIN_SUCCESS}" != "true" ]; then EXTRA="$EXTRA and not test_login_success"; fi
+          EXTRA="${{ inputs.pytest_marker }}"
+          if [ "${{ inputs.run_login_success }}" != "true" ]; then EXTRA="$EXTRA and not test_login_success"; fi
           pytest -vv -m "$EXTRA" tests \
             --browser=${{ matrix.browser }} \
             --screenshot=only-on-failure --video=off --tracing=retain-on-failure \
