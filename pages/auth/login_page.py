@@ -2,10 +2,19 @@
 import re
 import contextlib
 from typing import Optional
+from dataclasses import dataclass
 
 from playwright.sync_api import Page, Locator
 from pages.core.base_page import BasePage
 from pages.common_helpers import ResponseLike, fill_force, is_inside_ion_searchbar
+
+
+@dataclass
+class LoginResult:
+    status: Optional[int] = None
+    final_url: Optional[str] = None
+    error: Optional[str] = None
+    body: str = ""
 
 # -------------------- helpers --------------------
 
