@@ -14,6 +14,7 @@ def _norm(p: str) -> str:
         return ""
     if not s.startswith("/"):
         s = "/" + s
+    # trim trailing slashes
     return re.sub(r"/+$", "", s)
 
 def _variants(path: str):
@@ -27,7 +28,7 @@ def _variants(path: str):
             out.add(f"/{loc}{s}")
     return out
 
-def _csv_paths(envname: str, defaults: list[str]) -> list[str]:
+def _csv_paths(envname: str, defaults: List[str]) -> List[str]:
     raw = (os.getenv(envname) or "").strip()
     if not raw:
         items = defaults
@@ -132,14 +133,51 @@ CASES = [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] + \
         [{"kind": "protected", "path": p} for p in PROTECTED_ROUTES]
 
 # ===== fixtures =====
-@pytest.fixture(scope="session") # Login once per session
-def logged_in_page(new_page, base_url, auth_paths, credentials):
-    login_page = LoginPage(new_page, base_url, auth_paths["login"])
-    login_page.goto()
-    login_page.login(credentials["email"], credentials["password"])
-    # Add assertion to ensure login was successful
-    assert not login_page.is_login_page(), "Login failed in fixture"
-    return new_page
+@pytest.mark.smoke  # Mark as smoke to be included in default runs
+@pytest.mark.parametrize("path", [
+    "/en/store",
+    "/en/QR",
+    "/en/category",
+    "/en/product",
+    "/en/feedback",
+    "/en/settings/account",
+])
+def test_protected_routes_after_login(new_page, base_url, auth_paths, credentials, path):
+    """After successful login, protected routes should be accessible.
+
+    This test logs in within the function (avoids cross-scope fixtures), then
+    navigates to each protected path and verifies we are not redirected back
+    to a login-like screen and the navigation URL matches the target route.
+    """
+    # Perform login
+    lp = LoginPage(new_page, base_url, auth_paths["login"])
+    lp.goto()
+    lp.login(credentials.get("email", ""), credentials.get("password", ""))
+    with contextlib.suppress(Exception):
+        new_page.wait_for_load_state("domcontentloaded", timeout=8_000)
+        new_page.wait_for_timeout(250)
+
+    # Go to the protected path
+    url = f"{base_url}{path}"
+    new_page.set_default_navigation_timeout(TIMEOUT_MS)
+    resp = new_page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    with contextlib.suppress(Exception):
+        new_page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_MS)
+        new_page.wait_for_timeout(150)
+
+    # Assert that we are not shown a login-like UI
+    assert not _is_login_like(new_page), f"Redirected to login for {path} after login"
+
+    # Status should be OK if provided by Playwright (some navigations may return None)
+    status = getattr(resp, "status", None) if resp else None
+    assert status is None or status < 400, f"Bad status {status} for {path} after login"
+
+    # Final URL should include the path (or its locale variants)
+    final_url_norm = _norm(new_page.url)
+    path_variants = _variants(path)
+    assert any(_norm(v) in final_url_norm for v in path_variants), (
+        f"URL mismatch for {path}; final: {new_page.url}"
+    )
 
 # ===== tests =====
 @pytest.mark.smoke
@@ -185,31 +223,4 @@ def test_routes_access(new_page, base_url, case):
 
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
 
-# ===== New tests for protected routes after login =====
-PROTECTED_ROUTES_AFTER_LOGIN = [
-    "/en/store",
-    "/en/QR",
-    "/en/category",
-    "/en/product",
-    "/en/feedback",
-    "/en/settings/account",
-]
-
-@pytest.mark.smoke # Mark as smoke to be included in default runs
-@pytest.mark.parametrize("path", PROTECTED_ROUTES_AFTER_LOGIN)
-def test_protected_routes_after_login(logged_in_page, base_url, path):
-    """
-    Tests access to routes that require login after a successful login.
-    """
-    url = f"{base_url}{path}"
-    logged_in_page.set_default_navigation_timeout(TIMEOUT_MS)
-    resp = logged_in_page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-    
-    # Assert that we are not redirected to login and status is OK
-    assert not _is_login_like(logged_in_page), f"Redirected to login for {path} after login"
-    assert resp.status < 400, f"Bad status {resp.status} for {path} after login"
-    
-    # Check if the final URL contains the path, or a variant of it (e.g., with locale)
-    final_url_norm = _norm(logged_in_page.url)
-    path_variants = _variants(path)
-    assert any(_norm(v) in final_url_norm for v in path_variants), f"URL mismatch for {path}; final: {logged_in_page.url}"
+    # Note: Additional assertions may be added per-site if needed
