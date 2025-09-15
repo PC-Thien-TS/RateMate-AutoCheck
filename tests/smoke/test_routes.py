@@ -15,7 +15,7 @@ def _norm(p: str) -> str:
     if not s.startswith("/"):
         s = "/" + s
     # trim trailing slashes
-    return re.sub(r"/+$$, "", s)
+    return re.sub(r"/+$", "", s)
 
 def _variants(path: str):
     """Return valid variants for a path: /x and /<locale>/x for known locales."""
