@@ -1,54 +1,8 @@
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*- 
 # Aggregated fixtures for pytest: load modular fixtures.
 from _fixtures.config import *  # noqa
 from _fixtures.playwright import *  # noqa
 from _fixtures.roles import *  # noqa
-
-# --- Start of Custom Excel Report Generation ---
-import os
-import re
-import pathlib
-from typing import Tuple
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
-
-# Global list to store test results for the Excel report
-excel_report_data = []
-
-def _parse_docstring(doc: str) -> dict:
-    """Parses a structured docstring to extract report fields."""
-    if not doc:
-        return {}
-    
-    doc = doc.strip()
-    lines = doc.splitlines()
-    
-    data = {}
-    current_key = None
-    current_content = []
-
-    key_map = {
-        "precondition:": "precondition",
-        "test steps:": "test_steps",
-        "expected result:": "expected_result",
-    }
-
-    for line in lines:
-        line_lower = line.strip().lower()
-        if line_lower in key_map:
-            if current_key:
-                data[current_key] = "\n".join(current_content).strip()
-            
-            current_key = key_map[line_lower]
-            current_content = []
-        elif current_key:
-            current_content.append(line.strip())
-
-    if current_key:
-        data[current_key] = "\n".join(current_content).strip()
-        
-    return data
-# --- End of Custom Excel Report Generation ---
 
 
 def pytest_collection_modifyitems(items):
@@ -80,6 +34,10 @@ def pytest_collection_modifyitems(items):
 
 
 # ---------------- Enhanced reporting (HTML/JUnit metadata) ----------------
+import os
+import re
+from typing import Tuple
+
 try:
     # pytest-html uses py.xml.html for table cell helpers
     from py.xml import html  # type: ignore
@@ -122,7 +80,7 @@ def pytest_configure(config):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    # --- Original sessionfinish logic ---
+    # Compact end-of-run summary emphasizing pass/fail/error counts
     try:
         rep = session.testsfailed  # triggers creation of stats
         # Access internal stats dict
@@ -135,50 +93,6 @@ def pytest_sessionfinish(session, exitstatus):
         print(f"\n== Result: {total} tests | pass={passed} fail={failed} error={errored} skip={skipped}")
     except Exception:
         pass
-    
-    # --- New: Generate Custom Excel report ---
-    print("\n[report] Generating custom Excel report...")
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Test Report"
-
-    headers = [
-        "Test Case ID", "Title", "Status", "Duration", 
-        "Precondition", "Test Steps", "Expected Result"
-    ]
-    ws.append(headers)
-
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
-
-    for result in excel_report_data:
-        row = [
-            result["id"], result["title"], result["status"], result["duration"],
-            result["precondition"], result["test_steps"], result["expected_result"],
-        ]
-        ws.append(row)
-
-    for i, col in enumerate(ws.columns):
-        max_len = 0
-        col_letter = col[0].column_letter
-        for cell in col:
-            try:
-                if len(str(cell.value)) > max_len:
-                    max_len = len(cell.value)
-            except:
-                pass
-        adjusted_width = (max_len + 2)
-        ws.column_dimensions[col_letter].width = min(adjusted_width, 60) # Cap width at 60
-
-    report_dir = pathlib.Path("report")
-    report_dir.mkdir(exist_ok=True)
-    report_path = report_dir / "run.xlsx"
-    try:
-        wb.save(report_path)
-        print(f"[report] Custom Excel report saved to {report_path}")
-    except Exception as e:
-        print(f"[report] ERROR: Failed to save Excel report: {e}")
 
 
 def pytest_html_report_title(report):  # type: ignore[func-returns-value]
@@ -194,27 +108,6 @@ import pytest as _pytest  # local alias to avoid confusion
 def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
-    rep.item = item
-
-    # --- New: Capture data for Excel report ---
-    if rep.when == "call":
-        cid, title = _tc_info(item)
-        docstring_data = _parse_docstring(item.obj.__doc__ if hasattr(item, 'obj') and item.obj.__doc__ else '')
-        
-        status = "Passed"
-        if rep.failed:
-            status = "Failed"
-        elif rep.skipped:
-            status = "Skipped"
-
-        excel_report_data.append({
-            "id": cid, "title": title, "status": status, "duration": f"{rep.duration:.2f}s",
-            "precondition": docstring_data.get("precondition", ""),
-            "test_steps": docstring_data.get("test_steps", ""),
-            "expected_result": docstring_data.get("expected_result", ""),
-        })
-
-    # --- Original makereport logic for HTML/JUnit ---
     try:
         cid, title = _tc_info(item)
         rep.case_id = cid  # for pytest-html table row
