@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import pathlib
 from typing import List, Tuple
@@ -232,3 +232,4 @@ def test_routes_access(new_page, base_url, case):
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
 
     # Note: Additional assertions may be added per-site if needed
+
