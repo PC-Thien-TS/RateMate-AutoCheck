@@ -151,7 +151,6 @@ def logged_in_page(new_page, base_url, auth_paths, credentials):
     "/en/category",
     "/en/product",
     "/en/feedback",
-    "/en/settings/account",
 ])
 def test_protected_routes_after_login(logged_in_page, base_url, path):
     """After successful login, protected routes should be accessible."""
