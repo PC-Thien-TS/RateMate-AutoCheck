@@ -3,6 +3,8 @@ auth_paths:
   login: /en/login
   register: /en/login
 routes:
-  public: []
-  protected:
+  public:
+  - /login
   - /en/login
+  protected:
+  - /home
