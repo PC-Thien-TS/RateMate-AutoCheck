@@ -94,10 +94,11 @@ def _load_routes_from_site_config() -> Tuple[List[str], List[str]]:
                 data = {}
             routes = data.get("routes") or {}
             if isinstance(routes, dict):
-                pub = routes.get("public") or []
-                pro = routes.get("protected") or []
-                if isinstance(pub, list) or isinstance(pro, list):
-                    return (pub or PUBLIC_DEFAULT, pro or PROTECTED_DEFAULT)
+                pub = routes.get("public") if isinstance(routes.get("public"), list) else None
+                pro = routes.get("protected") if isinstance(routes.get("protected"), list) else None
+                if pub is not None or pro is not None:
+                    return (pub if pub is not None else PUBLIC_DEFAULT,
+                            pro if pro is not None else PROTECTED_DEFAULT)
             elif isinstance(routes, list):
                 return (routes or PUBLIC_DEFAULT, PROTECTED_DEFAULT)
             break
@@ -113,10 +114,11 @@ def _load_routes_from_site_config() -> Tuple[List[str], List[str]]:
             cfg = sites.get(site, {}) if isinstance(sites, dict) else {}
             routes = cfg.get("routes") or {}
             if isinstance(routes, dict):
-                pub = routes.get("public") or []
-                pro = routes.get("protected") or []
-                if isinstance(pub, list) or isinstance(pro, list):
-                    return (pub or PUBLIC_DEFAULT, pro or PROTECTED_DEFAULT)
+                pub = routes.get("public") if isinstance(routes.get("public"), list) else None
+                pro = routes.get("protected") if isinstance(routes.get("protected"), list) else None
+                if pub is not None or pro is not None:
+                    return (pub if pub is not None else PUBLIC_DEFAULT,
+                            pro if pro is not None else PROTECTED_DEFAULT)
             elif isinstance(routes, list):
                 return (routes or PUBLIC_DEFAULT, PROTECTED_DEFAULT)
             break
@@ -228,4 +230,3 @@ def test_routes_access(new_page, base_url, case):
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
 
     # Note: Additional assertions may be added per-site if needed
-

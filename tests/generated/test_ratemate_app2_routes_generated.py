@@ -8,8 +8,8 @@ from pages.auth.login_page import LoginPage
 SITE_KEY = 'ratemate_app2'
 BASE_URL_DISCOVERED = 'https://app2.ratemate.top'
 LOGIN_PATH_DISCOVERED = '/en/login'
-PUBLIC_ROUTES = ['/login', '/en/login']
-PROTECTED_ROUTES = ['/home']
+PUBLIC_ROUTES = ['/login', '/en/login', '/home']
+PROTECTED_ROUTES = []
 
 
 def _maybe_login(page, base_url, login_path, email, password):

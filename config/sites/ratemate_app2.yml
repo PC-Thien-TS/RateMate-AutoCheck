@@ -6,5 +6,5 @@ routes:
   public:
   - /login
   - /en/login
-  protected:
   - /home
+  protected: []
