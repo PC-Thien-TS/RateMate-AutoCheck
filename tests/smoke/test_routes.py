@@ -84,9 +84,11 @@ PROTECTED_DEFAULT = ["/store"]
 
 def _load_routes_from_site_config() -> Tuple[List[str], List[str]]:
     site = (os.getenv("SITE") or "ratemate").strip()
+    alias_map = {"ratemate1": "ratemate", "ratemate2": "ratemate"}
+    site_norm = alias_map.get(site.lower(), site)
     # Per-site file
     for ext in ("yml", "yaml"):
-        p = pathlib.Path(f"config/sites/{site}.{ext}")
+        p = pathlib.Path(f"config/sites/{site_norm}.{ext}")
         if p.is_file():
             try:
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
@@ -111,7 +113,7 @@ def _load_routes_from_site_config() -> Tuple[List[str], List[str]]:
             except Exception:
                 data = {}
             sites = data.get("sites") or {}
-            cfg = sites.get(site, {}) if isinstance(sites, dict) else {}
+            cfg = sites.get(site_norm, {}) if isinstance(sites, dict) else {}
             routes = cfg.get("routes") or {}
             if isinstance(routes, dict):
                 pub = routes.get("public") if isinstance(routes.get("public"), list) else None
