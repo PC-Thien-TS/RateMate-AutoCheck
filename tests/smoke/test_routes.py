@@ -200,7 +200,7 @@ def test_protected_routes_after_login(logged_in_page, base_url, path):
                     allowed.update(_variants(dst))
         # Conservative default for ratemate: QR may land on store
         site_name = (os.getenv("SITE") or "ratemate").strip().lower()
-        if not allowed and site_name == "ratemate" and _norm(path) == "/en/qr":
+        if not allowed and site_name == "ratemate" and _norm(path).lower() == "/en/qr":
             allowed.update(_variants("/en/store"))
         ok_here = any(_norm(v) in final_url_norm for v in allowed)
     assert ok_here, f"URL mismatch for {path}; final: {new_page.url}"
