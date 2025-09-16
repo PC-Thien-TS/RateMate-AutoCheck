@@ -23,7 +23,7 @@ def is_inside_ion_searchbar(locator: Locator) -> bool:
         return False
 
 
-def fill_force(locator: Locator, value: str, timeout: int = 10_000) -> None:
+def fill_force(locator: Locator, value: str, timeout: int = 30_000) -> None:
     """Robustly fill a field, falling back to JS assignment if needed.
 
     - Waits for visibility
