@@ -136,9 +136,15 @@ CASES = [{"kind": "public", "path": p} for p in PUBLIC_ROUTES] + \
 @pytest.fixture(scope="function")
 def logged_in_page(new_page, base_url, auth_paths, credentials):
     """Logs in and returns the page, ready for action."""
+    # Skip gracefully if credentials are not provided
+    email = credentials.get("email", "")
+    password = credentials.get("password", "")
+    if not email or not password:
+        pytest.skip("Missing E2E_EMAIL/E2E_PASSWORD; skipping login-dependent tests")
+
     lp = LoginPage(new_page, base_url, auth_paths["login"])
     lp.goto()
-    lp.login(credentials.get("email", ""), credentials.get("password", ""))
+    lp.login(email, password)
     with contextlib.suppress(Exception):
         new_page.wait_for_load_state("domcontentloaded", timeout=8_000)
         new_page.wait_for_timeout(250)
@@ -222,3 +228,4 @@ def test_routes_access(new_page, base_url, case):
     pytest.skip(f"{path} appears public (no redirect, no login gate); final: {final_url}")
 
     # Note: Additional assertions may be added per-site if needed
+
