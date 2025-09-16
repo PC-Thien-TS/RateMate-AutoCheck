@@ -17,7 +17,13 @@ def _first_existing(*paths: str) -> str | None:
 
 def _load_site_config() -> Dict:
     site = (os.getenv("SITE") or "").strip() or "ratemate"
-    per_site = _first_existing(f"config/sites/{site}.yml", f"config/sites/{site}.yaml")
+    # Normalize known aliases that actually refer to the same site
+    alias_map = {
+        "ratemate1": "ratemate",
+        "ratemate2": "ratemate",
+    }
+    site_norm = alias_map.get(site.lower(), site)
+    per_site = _first_existing(f"config/sites/{site_norm}.yml", f"config/sites/{site_norm}.yaml")
     many_sites = _first_existing("config/sites.yaml", "config/sites.yml")
 
     cfg: Dict = {}
@@ -29,7 +35,7 @@ def _load_site_config() -> Dict:
             with open(many_sites, "r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
             sites = (raw.get("sites") or {}) if isinstance(raw, dict) else {}
-            cfg = sites.get(site, {}) if isinstance(sites, dict) else {}
+            cfg = sites.get(site_norm, {}) if isinstance(sites, dict) else {}
         else:
             cfg = {}
     except Exception:
@@ -142,14 +148,19 @@ def auth_paths() -> dict:
 
 @pytest.fixture(scope="session")
 def credentials() -> dict:
-    site_key = (os.getenv("SITE") or "ratemate").strip().upper()
+    site_key_raw = (os.getenv("SITE") or "ratemate").strip().upper()
+    # Include normalized aliases so one set of creds can serve all variants
+    aliases = {site_key_raw}
+    if site_key_raw in {"RATEMATE1", "RATEMATE2"}:
+        aliases.add("RATEMATE")
 
     def pick(name: str) -> str:
-        for envn in (
-            f"E2E_{site_key}_{name}",
-            f"{site_key}_E2E_{name}",
-            f"E2E_{name}",
-        ):
+        order = []
+        for key in aliases:
+            order.append(f"E2E_{key}_{name}")
+            order.append(f"{key}_E2E_{name}")
+        order.append(f"E2E_{name}")
+        for envn in order:
             val = os.getenv(envn)
             if val:
                 return val
@@ -203,4 +214,3 @@ def all_routes(public_routes, protected_routes):
         [{"kind": "public", "path": p} for p in public_routes]
         + [{"kind": "protected", "path": p} for p in protected_routes]
     )
-

@@ -1,0 +1,17 @@
+base_url: https://store.ratemate.top
+
+auth_paths:
+  login: /en/login
+  register: /en/login
+
+locales: ["en"]
+
+routes:
+  public:
+    - /en/login
+    - /login
+  protected:
+    - /en/store
+    - /en/product
+    - /en/QR
+
