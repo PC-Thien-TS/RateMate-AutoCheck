@@ -225,13 +225,22 @@ def _build_header(summary):
         head.append("No testcases detected — JUnit missing/empty or tests crashed before reporting.")
     return "\n".join(head)
 
+def _filter_skipped(tests):
+    try:
+        pattern = os.getenv("TELEGRAM_SKIP_REASON_FILTER", "Missing E2E_EMAIL/E2E_PASSWORD|login-dependent tests")
+        rx = re.compile(pattern, re.I)
+        return [t for t in (tests or []) if not rx.search(t.get('reason') or '')]
+    except Exception:
+        return tests or []
+
+
 def _build_message(summary):
     blocks = [_build_header(summary)]
 
     passed = summary.get("passed_tests", [])
     failed = summary.get("failed_tests", [])
     errored = summary.get("errored_tests", [])
-    skipped = summary.get("skipped_tests", [])
+    skipped = _filter_skipped(summary.get("skipped_tests", []))
     
     def format_test_list(tests, show_reason=False):
         lines = []
