@@ -2,7 +2,10 @@
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    # 06:00 Asia/Ho_Chi_Minh (UTC+7) => 23:00 UTC (previous day)
+    - cron: '0 23 * * *'
+    # 18:00 Asia/Ho_Chi_Minh (UTC+7) => 11:00 UTC
+    - cron: '0 11 * * *'
   workflow_dispatch:
     inputs:
       site:
@@ -370,4 +373,3 @@ jobs:
             report/**
             tests/generated/**
           if-no-files-found: warn
-
