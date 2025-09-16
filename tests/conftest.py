@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 import os
 
+# Ensure core fixtures are loaded across the test suite
+pytest_plugins = [
+    "tests._fixtures.config",
+    "tests._fixtures.playwright",
+    "tests._fixtures.roles",
+]
+
 
 def _site_key_aliases() -> set[str]:
     raw = (os.getenv("SITE") or "ratemate").strip().upper()
@@ -53,4 +60,3 @@ def pytest_collection_modifyitems(config, items):
 
     if len(keep) != len(items):
         items[:] = keep
-
