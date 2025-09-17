@@ -63,7 +63,8 @@ jobs:
     name: Smoke (${{ matrix.site }} â€¢ ${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    if: ${{ (github.event.inputs.discover_urls == '' || !github.event.inputs.discover_urls) }}
+    # For schedule events, github.event.inputs is null; rely on env.DISCOVER_URLS
+    if: ${{ env.DISCOVER_URLS == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -161,7 +162,7 @@ jobs:
     name: Roles (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    if: ${{ (github.event.inputs.discover_urls == '' || !github.event.inputs.discover_urls) }}
+    if: ${{ env.DISCOVER_URLS == '' }}
     needs: smoke
     strategy:
       fail-fast: false
@@ -302,7 +303,7 @@ jobs:
     name: Discover & Run Generated
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    if: ${{ github.event.inputs.discover_urls != '' }}
+    if: ${{ env.DISCOVER_URLS != '' }}
     env:
       SITE: ${{ env.SITE_INPUT || vars.SITE || 'ratemate' }}
       BASE_URL: ${{ env.BASE_URL_INPUT || vars.BASE_URL || secrets.BASE_URL || 'https://store.ratemate.top' }}
@@ -310,7 +311,7 @@ jobs:
       REGISTER_PATH: ${{ env.REGISTER_PATH_INPUT || vars.REGISTER_PATH || secrets.REGISTER_PATH || '' }}
       E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
-      DISCOVER_URLS: ${{ github.event.inputs.discover_urls }}
+      DISCOVER_URLS: ${{ env.DISCOVER_URLS }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       JUNIT_XML: report/junit.xml
