@@ -40,7 +40,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
 
 # ---------- Models ----------
 class WebTestRequest(BaseModel):
-    url: AnyUrl
+    url: Optional[AnyUrl] = None
     test_type: Literal["smoke", "full", "performance", "security"] = "smoke"
     site: Optional[str] = None
     routes: Optional[List[str]] = None
@@ -86,6 +86,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def root():
+    return {
+        "name": "RateMate TaaS API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "endpoints": [
+            {"method": "POST", "path": "/api/test/web"},
+            {"method": "POST", "path": "/api/test/mobile"},
+            {"method": "POST", "path": "/api/upload/mobile"},
+            {"method": "GET", "path": "/api/jobs/{job_id}"},
+            {"method": "GET", "path": "/healthz"},
+        ],
+    }
 
 
 def _write_status(job_id: str, payload: dict, status: str, kind: str) -> Path:

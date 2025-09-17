@@ -69,8 +69,9 @@ def run_web_test(job_id: str, payload: Dict):
     urls: List[str]
     if routes:
         cfg = _load_site_routes(site)
-        base_url = (cfg.get("base_url") if isinstance(cfg, dict) else None) or None
-        urls = _to_abs_urls(base_url, [str(r) for r in routes])
+        base_url = (cfg.get("base_url") if isinstance(cfg, dict) else None) or payload.get("url") or None
+        route_list = [str(r) for r in routes]
+        urls = _to_abs_urls(base_url, route_list)
     elif site:
         cfg = _load_site_routes(site)
         base_url = (cfg.get("base_url") or "").strip()
@@ -81,19 +82,26 @@ def run_web_test(job_id: str, payload: Dict):
                 seq += rts["public"]
             if isinstance(rts.get("protected"), list):
                 seq += rts["protected"]
-            routes_list = [str(x) for x in seq]
+            route_list = [str(x) for x in seq]
         elif isinstance(rts, list):
-            routes_list = [str(x) for x in rts]
+            route_list = [str(x) for x in rts]
         else:
-            routes_list = ["/"]
-        urls = _to_abs_urls(base_url, routes_list)
+            route_list = ["/"]
+        urls = _to_abs_urls(base_url, route_list)
     else:
+        route_list = [url]
         urls = [url]
 
     case_results = []
     all_passed = True
     t0 = time.time()
     with sync_playwright() as p:
+        # Load optional assertions map from site config
+        assertions_map = {}
+        if site:
+            cfg = _load_site_routes(site)
+            if isinstance(cfg, dict) and isinstance(cfg.get("assertions"), dict):
+                assertions_map = cfg["assertions"]
         for idx, target in enumerate(urls):
             screenshot_path = RESULTS_DIR / f"{job_id}-{idx+1}-screenshot.png"
             trace_path = RESULTS_DIR / f"{job_id}-{idx+1}-trace.zip"
@@ -101,6 +109,7 @@ def run_web_test(job_id: str, payload: Dict):
             title = None
             passed = False
             err = None
+            missing: List[str] = []
             try:
                 browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"]) 
                 context = browser.new_context(viewport={"width": 1366, "height": 900})
@@ -111,6 +120,23 @@ def run_web_test(job_id: str, payload: Dict):
                 title = page.title()
                 page.screenshot(path=str(screenshot_path), full_page=True)
                 passed = bool(resp and 200 <= status_code < 400)
+                # Optional CSS selector assertions from site config
+                try:
+                    # Match by original route string if available
+                    route_key = route_list[idx] if idx < len(route_list) else None
+                    selectors = []
+                    if isinstance(assertions_map, dict) and route_key in assertions_map and isinstance(assertions_map[route_key], list):
+                        selectors = [str(s) for s in assertions_map[route_key]]
+                    for sel in selectors:
+                        try:
+                            if page.locator(sel).count() == 0:
+                                missing.append(sel)
+                        except Exception:
+                            missing.append(sel)
+                    if selectors:
+                        passed = passed and (len(missing) == 0)
+                except Exception:
+                    pass
                 context.tracing.stop(path=str(trace_path))
                 context.close(); browser.close()
             except Exception as e:
@@ -131,6 +157,7 @@ def run_web_test(job_id: str, payload: Dict):
                 "screenshot": str(screenshot_path) if screenshot_path.exists() else None,
                 "trace": str(trace_path) if trace_path.exists() else None,
                 "error": err,
+                "missing_selectors": missing or None,
             })
             if not passed:
                 all_passed = False

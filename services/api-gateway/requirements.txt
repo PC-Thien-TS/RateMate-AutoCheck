@@ -5,3 +5,4 @@ redis==5.0.7
 rq==1.16.2
 pydantic==2.9.2
 python-dateutil==2.9.0.post0
+python-multipart==0.0.9

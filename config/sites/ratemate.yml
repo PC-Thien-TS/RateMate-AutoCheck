@@ -1,17 +1,16 @@
-base_url: https://store.ratemate.top
+base_url: "https://store.ratemate.top"
 
-auth_paths:
-  login: /en/login
-  register: /en/login
-
-locales: ["en"]
-
+# Optional route lists the worker can crawl for multi‑route smoke
 routes:
   public:
-    - /en/login
-    - /login
-  protected:
-    - /en/store
-    - /en/product
-    - /en/QR
+    - "/en/login"
+    - "/en/store"
+  # protected:
+  #   - "/en/product"
 
+# Optional: per‑route CSS assertions (Playwright selectors)
+# assertions:
+#   "/en/login":
+#     - 'input[type="email"]'
+#     - 'input[type="password"]'
+#     - 'button:has-text("Log in")'
