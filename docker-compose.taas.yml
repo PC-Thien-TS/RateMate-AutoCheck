@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   redis:
     image: redis:7-alpine
@@ -29,6 +27,6 @@ services:
       - RQ_REDIS_URL=redis://redis:6379/0
     volumes:
       - ./:/workspace
+    shm_size: "1gb"
     depends_on:
       - redis
-

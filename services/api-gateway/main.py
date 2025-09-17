@@ -91,14 +91,15 @@ def _write_status(job_id: str, payload: dict, status: str, kind: str) -> Path:
         "payload": payload,
     }
     path = RESULTS_DIR / f"{job_id}.json"
-    path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(out, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return path
 
 
 @app.post("/api/test/web", response_model=JobEnqueueResponse)
 def enqueue_web(req: WebTestRequest, _: bool = Depends(verify_api_key)):
     job_id = uuid.uuid4().hex
-    payload = req.model_dump()
+    # Ensure JSON-serializable payload (e.g., AnyUrl -> str)
+    payload = req.model_dump(mode="json")
     _write_status(job_id, payload, status="queued", kind="web")
     q = get_queue()
     # Enqueue worker task name; worker container must import tasks.run_web_test
@@ -109,7 +110,7 @@ def enqueue_web(req: WebTestRequest, _: bool = Depends(verify_api_key)):
 @app.post("/api/test/mobile", response_model=JobEnqueueResponse)
 def enqueue_mobile(req: MobileTestRequest, _: bool = Depends(verify_api_key)):
     job_id = uuid.uuid4().hex
-    payload = req.model_dump()
+    payload = req.model_dump(mode="json")
     _write_status(job_id, payload, status="queued", kind="mobile")
     q = get_queue()
     q.enqueue("tasks.run_mobile_test", job_id, payload, job_id=job_id)
@@ -138,4 +139,3 @@ def healthz():
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
