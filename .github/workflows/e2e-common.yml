@@ -71,31 +71,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Telegram start ping
-        if: ${{ env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          BROWSER: ${{ matrix.browser }}
-        run: |
-          python - <<'PY'
-          import os, requests
-          tok=os.getenv('TELEGRAM_BOT_TOKEN',''); chat=os.getenv('TELEGRAM_CHAT_ID','')
-          if tok and chat:
-              text=(
-                  f"⏱ Starting E2E: SITE={os.getenv('SITE')} "
-                  f"BASE={os.getenv('BASE_URL')} BROWSER={os.getenv('BROWSER')}\n"
-                  f"Run: {os.getenv('RUN_URL')}"
-              )
-              try:
-                  requests.post(
-                      f"https://api.telegram.org/bot{tok}/sendMessage",
-                      data={"chat_id": chat, "text": text, "disable_web_page_preview": True}, timeout=20
-                  )
-              except Exception:
-                  pass
-          PY
+      
       - name: Preflight base URL
         id: preflight
         run: |
