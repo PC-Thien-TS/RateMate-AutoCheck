@@ -31,6 +31,8 @@ help:
 	@echo "  make roles SITE=...   - run role permission tests (marker roles)"
 	@echo "  make write SITE=...   - run write tests (requires E2E_ALLOW_WRITE=1)"
 	@echo "  make secrets-check    - show which role creds are set"
+	@echo "  make taas-up          - start TaaS stack (API+Redis+Worker)"
+	@echo "  make taas-down        - stop TaaS stack"
 
 $(REPORT_DIR):
 	mkdir -p $(REPORT_DIR)
@@ -75,6 +77,13 @@ warm-cache:
 	mkdir -p $(HOME)/.cache/ms-playwright
 	docker run $(DOCKER_RUN_OPTS) --user 0:0 -v "$(HOME)/.cache/ms-playwright:/ms-playwright" $(MOUNT) $(ENVFILE) $(DOCKER_IMG) \
 	  bash -lc 'python -m playwright install --with-deps'
+
+.PHONY: taas-up taas-down
+taas-up:
+	docker compose -f docker-compose.taas.yml up --build -d
+
+taas-down:
+	docker compose -f docker-compose.taas.yml down -v
 
 # Auto-discovery (runs in Docker image)
 .PHONY: discover
