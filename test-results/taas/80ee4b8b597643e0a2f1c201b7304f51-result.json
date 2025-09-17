@@ -1,0 +1,12 @@
+{
+  "url": "https://store.ratemate.top/login",
+  "test_type": "smoke",
+  "passed": true,
+  "status_code": 200,
+  "title": "Login",
+  "screenshot": "/workspace/test-results/taas/80ee4b8b597643e0a2f1c201b7304f51-screenshot.png",
+  "duration_sec": 4.52,
+  "metrics": null,
+  "alerts": [],
+  "error": null
+}

@@ -2,9 +2,9 @@ import os
 import uuid
 import json
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
-from fastapi import FastAPI, Depends, Header, HTTPException, status
+from fastapi import FastAPI, Depends, Header, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
 from rq import Queue
@@ -14,6 +14,8 @@ from redis import Redis
 # ---------- Config ----------
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = Path(os.getenv("TAAS_UPLOAD_DIR", str(RESULTS_DIR / "uploads"))).resolve()
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 QUEUE_NAME = os.getenv("TAAS_QUEUE_NAME", "taas")
@@ -41,6 +43,7 @@ class WebTestRequest(BaseModel):
     url: AnyUrl
     test_type: Literal["smoke", "full", "performance", "security"] = "smoke"
     site: Optional[str] = None
+    routes: Optional[List[str]] = None
 
 
 class MobileDevice(BaseModel):
@@ -53,6 +56,8 @@ class MobileDevice(BaseModel):
 class MobileTestRequest(BaseModel):
     apk_url: Optional[str] = None
     ipa_url: Optional[str] = None
+    apk_path: Optional[str] = None
+    ipa_path: Optional[str] = None
     deep_link: Optional[str] = None
     test_type: Literal["analyze", "e2e"] = "analyze"
     device: Optional[MobileDevice] = None
@@ -115,6 +120,23 @@ def enqueue_mobile(req: MobileTestRequest, _: bool = Depends(verify_api_key)):
     q = get_queue()
     q.enqueue("tasks.run_mobile_test", job_id, payload, job_id=job_id)
     return JobEnqueueResponse(job_id=job_id, status="queued")
+
+
+@app.post("/api/upload/mobile")
+def upload_mobile(file: UploadFile = File(...), _: bool = Depends(verify_api_key)):
+    try:
+        suffix = Path(file.filename or "upload.bin").suffix.lower()
+        name = f"{uuid.uuid4().hex}{suffix}"
+        dst = UPLOAD_DIR / name
+        with dst.open("wb") as f:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+        return {"path": str(dst), "filename": file.filename, "size": dst.stat().st_size}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobStatusResponse)

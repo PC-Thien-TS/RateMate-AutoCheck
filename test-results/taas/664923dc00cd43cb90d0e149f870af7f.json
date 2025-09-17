@@ -1,0 +1,11 @@
+{
+  "job_id": "664923dc00cd43cb90d0e149f870af7f",
+  "status": "completed",
+  "kind": "web",
+  "payload": {
+    "url": "https://store.ratemate.top/login",
+    "test_type": "smoke",
+    "site": null
+  },
+  "result_path": "/workspace/test-results/taas/664923dc00cd43cb90d0e149f870af7f-result.json"
+}

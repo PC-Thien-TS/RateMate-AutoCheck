@@ -12,6 +12,7 @@ services:
       - TAAS_QUEUE_NAME=taas
       - API_KEY=${API_KEY:-dev-key}
       - TAAS_RESULTS_DIR=/workspace/test-results/taas
+      - TAAS_UPLOAD_DIR=/workspace/test-results/taas/uploads
     volumes:
       - ./:/workspace
     ports:
@@ -25,6 +26,9 @@ services:
     environment:
       - TAAS_RESULTS_DIR=/workspace/test-results/taas
       - RQ_REDIS_URL=redis://redis:6379/0
+      # Optionally configure MobSF
+      # - MOBSF_URL=http://host.docker.internal:8000
+      # - MOBSF_API_KEY=xxxx
     volumes:
       - ./:/workspace
     shm_size: "1gb"
