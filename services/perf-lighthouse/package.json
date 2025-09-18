@@ -1,0 +1,12 @@
+{
+  "name": "perf-lighthouse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "express": "4.19.2",
+    "lighthouse": "12.3.0",
+    "chrome-launcher": "1.1.1"
+  }
+}
+

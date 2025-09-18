@@ -19,6 +19,7 @@ services:
       - "8000:8000"
     depends_on:
       - redis
+      - perf
 
   worker:
     build:
@@ -34,3 +35,13 @@ services:
     shm_size: "1gb"
     depends_on:
       - redis
+      - perf
+
+  perf:
+    build:
+      context: ./services/perf-lighthouse
+    environment:
+      - PORT=3001
+      - CHROME_PATH=/usr/bin/chromium
+    ports:
+      - "3001:3001"

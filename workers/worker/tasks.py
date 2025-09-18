@@ -250,6 +250,21 @@ def run_web_test(job_id: str, payload: Dict):
 
     elapsed = round(time.time() - t0, 2)
 
+    # Optionally run Lighthouse performance on the first URL when requested
+    perf_result = None
+    if test_type == "performance" and urls:
+        try:
+            r = requests.post("http://perf:3001/run", json={"url": urls[0]}, timeout=180)
+            if r.status_code < 400:
+                pj = r.json()
+                perf_result = {
+                    "url": pj.get("url"),
+                    "performance_score": pj.get("performance_score"),
+                    "metrics": pj.get("metrics"),
+                }
+        except Exception:
+            perf_result = {"error": "lighthouse_failed"}
+
     # For single URL keep backward-compatible shape
     if len(urls) == 1:
         r0 = case_results[0]
@@ -265,6 +280,7 @@ def run_web_test(job_id: str, payload: Dict):
             "metrics": None,
             "alerts": [],
             "error": r0.get("error"),
+            "performance": perf_result,
         }
     else:
         result = {
@@ -272,6 +288,7 @@ def run_web_test(job_id: str, payload: Dict):
             "passed": all_passed,
             "cases": case_results,
             "duration_sec": elapsed,
+            "performance": perf_result,
         }
     out_path = RESULTS_DIR / f"{job_id}-result.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
