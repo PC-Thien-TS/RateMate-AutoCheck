@@ -41,7 +41,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
 # ---------- Models ----------
 class WebTestRequest(BaseModel):
     url: Optional[AnyUrl] = None
-    test_type: Literal["smoke", "full", "performance", "security"] = "smoke"
+    test_type: Literal["smoke", "full", "performance", "security", "auto"] = "smoke"
     site: Optional[str] = None
     routes: Optional[List[str]] = None
 

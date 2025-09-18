@@ -8,9 +8,11 @@ routes:
   # protected:
   #   - "/en/product"
 
-# Optional: per‑route CSS assertions (Playwright selectors)
-# assertions:
-#   "/en/login":
-#     - 'input[type="email"]'
-#     - 'input[type="password"]'
-#     - 'button:has-text("Log in")'
+# Optional: per‑route selector assertions (Playwright locators)
+assertions:
+  "/en/login":
+    - 'input[type="email"]'
+    - 'input[type="password"]'
+    - 'button:has-text("Log in")'
+  # "/en/store":
+  #   - 'text=RateMate'

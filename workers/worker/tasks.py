@@ -2,11 +2,13 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from playwright.sync_api import sync_playwright
 import yaml
 import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse, urlunparse
 
 
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
@@ -58,6 +60,69 @@ def _to_abs_urls(base_url: Optional[str], routes: List[str]) -> List[str]:
     return out
 
 
+def _normalize_url(u: str) -> str:
+    try:
+        pr = urlparse(u)
+        # drop fragments and normalize path
+        path = pr.path or "/"
+        return urlunparse((pr.scheme, pr.netloc, path, "", pr.query, ""))
+    except Exception:
+        return u
+
+
+def _same_host(a: str, b: str) -> bool:
+    try:
+        pa, pb = urlparse(a), urlparse(b)
+        return (pa.scheme, pa.netloc) == (pb.scheme, pb.netloc)
+    except Exception:
+        return False
+
+
+def _crawl_links(start_url: str, max_pages: int = 6) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    q: List[str] = [_normalize_url(start_url)]
+    base = _normalize_url(start_url)
+    headers = {"User-Agent": "RateMateCrawler/0.1"}
+    exts = {"jpg", "jpeg", "png", "gif", "svg", "webp", "css", "js", "ico", "pdf", "zip"}
+
+    while q and len(out) < max_pages:
+        cur = q.pop(0)
+        if cur in seen:
+            continue
+        seen.add(cur)
+        try:
+            r = requests.get(cur, headers=headers, timeout=10)
+            if r.status_code >= 400:
+                continue
+            out.append(cur)
+            soup = BeautifulSoup(r.text, "lxml")
+            for a in soup.select("a[href]"):
+                href = a.get("href") or ""
+                if href.startswith("javascript:"):
+                    continue
+                cand = urljoin(cur, href)
+                cand = _normalize_url(cand)
+                # filter by same host and skip static resources
+                if not _same_host(base, cand):
+                    continue
+                path = urlparse(cand).path or "/"
+                if "." in path.split("/")[-1]:
+                    ext = path.split("/")[-1].split(".")[-1].lower()
+                    if ext in exts:
+                        continue
+                if cand not in seen and cand not in q:
+                    q.append(cand)
+        except Exception:
+            continue
+    # de-dup preserve order
+    uniq = []
+    for u in out:
+        if u not in uniq:
+            uniq.append(u)
+    return uniq
+
+
 def run_web_test(job_id: str, payload: Dict):
     _update(job_id, {"status": "running"})
     url = (payload.get("url") or "").strip()
@@ -91,6 +156,27 @@ def run_web_test(job_id: str, payload: Dict):
     else:
         route_list = [url]
         urls = [url]
+
+    # Auto mode: crawl from base URL if requested
+    if test_type == "auto":
+        seed = url or None
+        if site and not seed:
+            cfg = _load_site_routes(site)
+            seed = (cfg.get("base_url") or "").strip() if isinstance(cfg, dict) else None
+        if seed:
+            discovered = _crawl_links(seed, max_pages=6)
+            if discovered:
+                # Prefer login/store-like paths first
+                def score(u: str) -> int:
+                    p = (urlparse(u).path or "").lower()
+                    s = 0
+                    for k in ["login", "signin", "store", "home", "product", "account"]:
+                        if k in p:
+                            s -= 10
+                    return s
+
+                discovered.sort(key=score)
+                urls = discovered
 
     case_results = []
     all_passed = True

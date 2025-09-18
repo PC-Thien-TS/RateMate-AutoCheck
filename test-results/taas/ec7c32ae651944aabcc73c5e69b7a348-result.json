@@ -1,0 +1,13 @@
+{
+  "url": "https://example.com/string",
+  "test_type": "smoke",
+  "passed": false,
+  "status_code": 404,
+  "title": "Example Domain",
+  "screenshot": "/workspace/test-results/taas/ec7c32ae651944aabcc73c5e69b7a348-1-screenshot.png",
+  "trace": "/workspace/test-results/taas/ec7c32ae651944aabcc73c5e69b7a348-1-trace.zip",
+  "duration_sec": 3.11,
+  "metrics": null,
+  "alerts": [],
+  "error": null
+}
