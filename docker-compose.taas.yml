@@ -20,6 +20,7 @@ services:
     depends_on:
       - redis
       - perf
+      - zap
 
   worker:
     build:
@@ -36,6 +37,7 @@ services:
     depends_on:
       - redis
       - perf
+      - zap
 
   perf:
     build:
@@ -45,3 +47,11 @@ services:
       - CHROME_PATH=/usr/bin/chromium
     ports:
       - "3001:3001"
+
+  zap:
+    image: owasp/zap2docker-stable
+    command: ["zap.sh", "-daemon", "-host", "0.0.0.0", "-port", "8090", "-config", "api.addrs.addr.name=.*", "-config", "api.addrs.addr.regex=true", "-config", "api.key=${ZAP_API_KEY:-changeme}"]
+    environment:
+      - ZAP_API_KEY=${ZAP_API_KEY:-changeme}
+    ports:
+      - "8090:8090"

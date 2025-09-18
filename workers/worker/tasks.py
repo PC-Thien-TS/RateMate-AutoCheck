@@ -9,6 +9,7 @@ import yaml
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, urlunparse
+from zapv2 import ZAPv2
 
 
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
@@ -265,6 +266,42 @@ def run_web_test(job_id: str, payload: Dict):
         except Exception:
             perf_result = {"error": "lighthouse_failed"}
 
+    # Optionally run ZAP baseline (spider + passive scan) when requested
+    zap_result = None
+    if test_type == "security" and urls:
+        try:
+            target = urls[0]
+            api_key = os.getenv("ZAP_API_KEY", "changeme")
+            zap = ZAPv2(apikey=api_key, proxies={'http': 'http://zap:8090', 'https': 'http://zap:8090'})
+            # Start spider
+            sid = zap.spider.scan(target)
+            # Wait spider
+            while True:
+                status = int(zap.spider.status(sid))
+                if status >= 100:
+                    break
+                time.sleep(1)
+            # Passive scanning usually runs automatically, give it a moment
+            time.sleep(2)
+            # Fetch alerts
+            alerts = zap.core.alerts(baseurl=target) or []
+            # Summarize by risk
+            counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+            items = []
+            for a in alerts:
+                risk = a.get('risk') or a.get('riskdesc', '').split(' ')[0]
+                if risk in counts:
+                    counts[risk] += 1
+                items.append({
+                    'risk': risk,
+                    'alert': a.get('alert'),
+                    'url': a.get('url'),
+                    'evidence': a.get('evidence')
+                })
+            zap_result = {"counts": counts, "alerts": items[:50]}
+        except Exception as e:
+            zap_result = {"error": str(e)}
+
     # For single URL keep backward-compatible shape
     if len(urls) == 1:
         r0 = case_results[0]
@@ -281,6 +318,7 @@ def run_web_test(job_id: str, payload: Dict):
             "alerts": [],
             "error": r0.get("error"),
             "performance": perf_result,
+            "security": zap_result,
         }
     else:
         result = {
@@ -289,6 +327,7 @@ def run_web_test(job_id: str, payload: Dict):
             "cases": case_results,
             "duration_sec": elapsed,
             "performance": perf_result,
+            "security": zap_result,
         }
     out_path = RESULTS_DIR / f"{job_id}-result.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
