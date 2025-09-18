@@ -11,7 +11,7 @@ Body
 ```
 {
   "url": "https://store.ratemate.top",              // optional nếu dùng site config
-  "test_type": "smoke" | "full" | "performance" | "security",
+  "test_type": "smoke" | "full" | "performance" | "security" | "auto",
   "site": "ratemate",                                // optional
   "routes": ["/en/login","/en/store"]              // optional (multi‑route)
 }
@@ -74,3 +74,14 @@ routes:
 - Gửi `{ "site": "ratemate", "test_type": "smoke" }` để worker tự lấy base_url + routes.
 - Nếu truyền `routes` mà không có file site, hãy cung cấp `url` làm base.
 
+## Performance & Security
+
+- Performance (Lighthouse): `test_type: "performance"`
+  - JSON: `performance.performance_score` và `performance.metrics`
+  - Report HTML: `test-results/taas/<job_id>-perf.html`
+  - Threshold env (optional): `PERF_SCORE_MIN` (80), `PERF_LCP_MAX_MS` (2500), `PERF_CLS_MAX` (0.1), `PERF_TTI_MAX_MS` (5000)
+
+- Security (OWASP ZAP): `test_type: "security"`
+  - JSON: `security.counts` (High/Medium/Low/Informational) + `alerts`
+  - Report HTML: `test-results/taas/<job_id>-zap.html`
+  - Threshold env (optional): `ZAP_ALLOW_MEDIUM` (0), `ZAP_ALLOW_HIGH` (0)

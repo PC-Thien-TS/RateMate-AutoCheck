@@ -31,6 +31,14 @@ services:
       # Optionally configure MobSF
       # - MOBSF_URL=http://host.docker.internal:8000
       # - MOBSF_API_KEY=xxxx
+      # Performance thresholds (optional)
+      # - PERF_SCORE_MIN=80
+      # - PERF_LCP_MAX_MS=2500
+      # - PERF_CLS_MAX=0.1
+      # - PERF_TTI_MAX_MS=5000
+      # Security thresholds (optional)
+      # - ZAP_ALLOW_MEDIUM=0
+      # - ZAP_ALLOW_HIGH=0
     volumes:
       - ./:/workspace
     shm_size: "1gb"

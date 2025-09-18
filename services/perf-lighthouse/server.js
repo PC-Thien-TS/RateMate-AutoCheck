@@ -10,6 +10,7 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.post('/run', async (req, res) => {
   const url = (req.body?.url || req.query?.url || '').toString();
   if (!url) return res.status(400).json({ error: 'url required' });
+  const wantHtml = !!(req.body?.html || req.query?.html);
   const flags = {
     chromeFlags: ['--headless', '--no-sandbox', '--disable-dev-shm-usage'],
     output: 'json'
@@ -41,6 +42,14 @@ app.post('/run', async (req, res) => {
       },
       lhr
     };
+    if (wantHtml) {
+      try {
+        const reportHtml = await lighthouse.generateReport(runnerResult.lhr, 'html');
+        out.reportHtml = reportHtml;
+      } catch (e) {
+        out.reportHtmlError = e?.message || String(e);
+      }
+    }
     res.json(out);
   } catch (e) {
     res.status(500).json({ error: (e?.message || String(e)) });
@@ -51,4 +60,3 @@ app.post('/run', async (req, res) => {
 
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`perf-lighthouse listening on ${port}`));
-

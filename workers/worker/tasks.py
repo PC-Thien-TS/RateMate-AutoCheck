@@ -253,9 +253,11 @@ def run_web_test(job_id: str, payload: Dict):
 
     # Optionally run Lighthouse performance on the first URL when requested
     perf_result = None
+    perf_ok = True
+    perf_reason = []
     if test_type == "performance" and urls:
         try:
-            r = requests.post("http://perf:3001/run", json={"url": urls[0]}, timeout=180)
+            r = requests.post("http://perf:3001/run", json={"url": urls[0], "html": True}, timeout=240)
             if r.status_code < 400:
                 pj = r.json()
                 perf_result = {
@@ -263,11 +265,40 @@ def run_web_test(job_id: str, payload: Dict):
                     "performance_score": pj.get("performance_score"),
                     "metrics": pj.get("metrics"),
                 }
-        except Exception:
-            perf_result = {"error": "lighthouse_failed"}
+                # Save HTML report if present
+                try:
+                    html = pj.get("reportHtml")
+                    if html:
+                        perf_html = RESULTS_DIR / f"{job_id}-perf.html"
+                        perf_html.write_text(html, encoding="utf-8")
+                        perf_result["report_path"] = str(perf_html)
+                except Exception:
+                    pass
+                # Apply thresholds
+                score_min = int(os.getenv("PERF_SCORE_MIN", "80"))
+                lcp_max = float(os.getenv("PERF_LCP_MAX_MS", "2500"))
+                cls_max = float(os.getenv("PERF_CLS_MAX", "0.1"))
+                tti_max = float(os.getenv("PERF_TTI_MAX_MS", "5000"))
+                m = perf_result.get("metrics") or {}
+                if perf_result.get("performance_score") is not None and perf_result["performance_score"] < score_min:
+                    perf_ok = False; perf_reason.append(f"score<{score_min}")
+                if m.get("lcp") and m["lcp"] > lcp_max:
+                    perf_ok = False; perf_reason.append(f"lcp>{lcp_max}")
+                if m.get("cls") and m["cls"] > cls_max:
+                    perf_ok = False; perf_reason.append(f"cls>{cls_max}")
+                if m.get("tti") and m["tti"] > tti_max:
+                    perf_ok = False; perf_reason.append(f"tti>{tti_max}")
+            else:
+                perf_result = {"error": f"lighthouse_status_{r.status_code}"}
+                perf_ok = False
+        except Exception as e:
+            perf_result = {"error": f"lighthouse_failed:{e}"}
+            perf_ok = False
 
     # Optionally run ZAP baseline (spider + passive scan) when requested
     zap_result = None
+    zap_ok = True
+    zap_reason = []
     if test_type == "security" and urls:
         try:
             target = urls[0]
@@ -298,9 +329,29 @@ def run_web_test(job_id: str, payload: Dict):
                     'url': a.get('url'),
                     'evidence': a.get('evidence')
                 })
-            zap_result = {"counts": counts, "alerts": items[:50]}
+            # HTML report
+            try:
+                html = zap.core.htmlreport()
+                if html:
+                    zap_html = RESULTS_DIR / f"{job_id}-zap.html"
+                    zap_html.write_text(html, encoding="utf-8")
+                    report_path = str(zap_html)
+                else:
+                    report_path = None
+            except Exception:
+                report_path = None
+            # thresholds
+            allow_med = int(os.getenv("ZAP_ALLOW_MEDIUM", "0"))
+            allow_high = int(os.getenv("ZAP_ALLOW_HIGH", "0"))
+            if counts.get("High", 0) > allow_high:
+                zap_ok = False; zap_reason.append(f"high>{allow_high}")
+            if counts.get("Medium", 0) > allow_med:
+                zap_ok = False; zap_reason.append(f"medium>{allow_med}")
+
+            zap_result = {"counts": counts, "alerts": items[:50], "report_path": report_path}
         except Exception as e:
             zap_result = {"error": str(e)}
+            zap_ok = False
 
     # For single URL keep backward-compatible shape
     if len(urls) == 1:
@@ -319,6 +370,7 @@ def run_web_test(job_id: str, payload: Dict):
             "error": r0.get("error"),
             "performance": perf_result,
             "security": zap_result,
+            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None},
         }
     else:
         result = {
@@ -328,10 +380,12 @@ def run_web_test(job_id: str, payload: Dict):
             "duration_sec": elapsed,
             "performance": perf_result,
             "security": zap_result,
+            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None},
         }
     out_path = RESULTS_DIR / f"{job_id}-result.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    final = {"status": "completed" if all_passed else "failed", "result_path": str(out_path)}
+    final_pass = all_passed and (perf_ok if test_type == "performance" else True) and (zap_ok if test_type == "security" else True)
+    final = {"status": "completed" if final_pass else "failed", "result_path": str(out_path)}
     _update(job_id, final)
 
 
