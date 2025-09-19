@@ -1,0 +1,122 @@
+name: TaaS E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: web or mobile
+        required: true
+        default: web
+      test_type:
+        description: smoke|performance|security|auto|analyze (mobile)
+        required: true
+        default: smoke
+      url:
+        description: Base URL (for web) or direct URL
+        required: false
+      site:
+        description: Site key configured on server (optional)
+        required: false
+      routes:
+        description: Comma separated routes (optional)
+        required: false
+      apk_url:
+        description: APK URL for mobile analyze (optional)
+        required: false
+
+env:
+  TAAS_API_URL: ${{ secrets.TAAS_API_URL }}
+  TAAS_API_KEY: ${{ secrets.TAAS_API_KEY }}
+
+jobs:
+  run-taas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate env
+        run: |
+          if [ -z "${TAAS_API_URL}" ] || [ -z "${TAAS_API_KEY}" ]; then
+            echo "TAAS_API_URL/TAAS_API_KEY not set in repo secrets" >&2
+            exit 1
+          fi
+
+      - name: Enqueue
+        id: enqueue
+        env:
+          KIND: ${{ github.event.inputs.kind }}
+          TEST_TYPE: ${{ github.event.inputs.test_type }}
+          INPUT_URL: ${{ github.event.inputs.url }}
+          SITE: ${{ github.event.inputs.site }}
+          ROUTES: ${{ github.event.inputs.routes }}
+          APK_URL: ${{ github.event.inputs.apk_url }}
+        run: |
+          set -e
+          echo "Kind=$KIND TestType=$TEST_TYPE"
+          if [ "$KIND" = "mobile" ]; then
+            BODY=$(python - <<'PY'
+import os, json
+body = {"test_type": os.getenv("TEST_TYPE") or "analyze"}
+if os.getenv("APK_URL"): body["apk_url"] = os.getenv("APK_URL")
+print(json.dumps(body))
+PY
+)
+            URL="$TAAS_API_URL/api/test/mobile"
+          else
+            BODY=$(python - <<'PY'
+import os, json
+body = {"test_type": os.getenv("TEST_TYPE") or "smoke"}
+if os.getenv("INPUT_URL"): body["url"] = os.getenv("INPUT_URL")
+if os.getenv("SITE"): body["site"] = os.getenv("SITE")
+routes = os.getenv("ROUTES")
+if routes:
+    body["routes"] = [x.strip() for x in routes.split(',') if x.strip()]
+print(json.dumps(body))
+PY
+)
+            URL="$TAAS_API_URL/api/test/web"
+          fi
+          echo "Request body: $BODY"
+          JOB_JSON=$(curl -sS -X POST "$URL" -H "x-api-key: $TAAS_API_KEY" -H "Content-Type: application/json" -d "$BODY")
+          echo "$JOB_JSON" | tee job.json
+          JOB_ID=$(python - <<'PY'
+import json,sys
+print(json.load(open('job.json'))['job_id'])
+PY
+)
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+
+      - name: Poll status
+        id: poll
+        env:
+          JOB_ID: ${{ steps.enqueue.outputs.job_id }}
+        run: |
+          set -e
+          python - <<'PY'
+import os, sys, time, json
+import urllib.request
+
+api = os.environ['TAAS_API_URL']
+key = os.environ['TAAS_API_KEY']
+job = os.environ['JOB_ID']
+url = f"{api}/api/jobs/{job}"
+deadline = time.time() + 900
+status = 'queued'
+while time.time() < deadline and status in ('queued','running'):
+    req = urllib.request.Request(url, headers={'x-api-key': key})
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read().decode('utf-8'))
+    status = data.get('status')
+    print('status=', status, flush=True)
+    if status in ('queued','running'):
+        time.sleep(2)
+open('job-status.json','w').write(json.dumps(data, indent=2, ensure_ascii=False))
+print('final=', data)
+if data.get('status') != 'completed':
+    sys.exit(2)
+PY
+
+      - name: Upload job status
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-status
+          path: job-status.json
+
