@@ -1,0 +1,21 @@
+{
+  "url": "https://store.ratemate.top/login",
+  "test_type": "smoke",
+  "passed": true,
+  "status_code": 200,
+  "title": "Login",
+  "screenshot": "/workspace/test-results/taas/20859347a92049e388721ad44fa8e596-1-screenshot.png",
+  "trace": "/workspace/test-results/taas/20859347a92049e388721ad44fa8e596-1-trace.zip",
+  "duration_sec": 4.28,
+  "metrics": null,
+  "alerts": [],
+  "error": null,
+  "performance": null,
+  "security": null,
+  "policy": {
+    "performance_ok": true,
+    "performance_reasons": null,
+    "security_ok": true,
+    "security_reasons": null
+  }
+}

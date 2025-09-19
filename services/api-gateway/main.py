@@ -76,6 +76,7 @@ class JobStatusResponse(BaseModel):
     kind: str
     result_path: Optional[str] = None
     error: Optional[str] = None
+    payload: Optional[dict] = None
 
 
 # ---------- App ----------
@@ -183,6 +184,7 @@ def get_job(job_id: str, _: bool = Depends(verify_api_key)):
         kind=str(data.get("kind") or "unknown"),
         result_path=str(data.get("result_path") or ""),
         error=data.get("error"),
+        payload=data.get("payload") if isinstance(data.get("payload"), dict) else None,
     )
 
 

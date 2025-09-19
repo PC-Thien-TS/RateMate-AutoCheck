@@ -480,6 +480,24 @@ def run_web_test(job_id: str, payload: Dict):
     except Exception:
         pass
 
+    # Slack notification (optional)
+    try:
+        hook = os.getenv('SLACK_WEBHOOK_URL')
+        if hook:
+            title = f"TaaS {test_type.upper()} {final['status'].upper()}"
+            lines = [f"job: {job_id}", f"type: {test_type}", f"status: {final['status']}"]
+            if perf_result and perf_result.get('performance_score') is not None:
+                lines.append(f"perf: {perf_result['performance_score']}")
+            if zap_result and zap_result.get('counts'):
+                c = zap_result['counts']; lines.append(f"zap: H{c.get('High',0)}/M{c.get('Medium',0)}/L{c.get('Low',0)}")
+            if artifacts:
+                for k,v in list(artifacts.items())[:4]:
+                    if v and v.get('presigned_url'): lines.append(f"{k}: {v['presigned_url']}")
+            payload = {"text": title + "\n" + "\n".join(lines)}
+            requests.post(hook, json=payload, timeout=10)
+    except Exception:
+        pass
+
 
 def run_mobile_test(job_id: str, payload: Dict):
     _update(job_id, {"status": "running"})
