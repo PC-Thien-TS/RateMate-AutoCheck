@@ -1,0 +1,21 @@
+{
+  "url": "",
+  "test_type": "smoke",
+  "passed": false,
+  "status_code": null,
+  "title": null,
+  "screenshot": null,
+  "trace": "/workspace/test-results/taas/dec048343bad499c8bb3014eea4b0c09-1-trace.zip",
+  "duration_sec": 1.09,
+  "metrics": null,
+  "alerts": [],
+  "error": "Page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL\nCall log:\n  - navigating to \"\", waiting until \"networkidle\"\n",
+  "performance": null,
+  "security": null,
+  "policy": {
+    "performance_ok": true,
+    "performance_reasons": null,
+    "security_ok": true,
+    "security_reasons": null
+  }
+}

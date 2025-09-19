@@ -1,0 +1,19 @@
+{
+  "job_id": "dec048343bad499c8bb3014eea4b0c09",
+  "status": "failed",
+  "kind": "web",
+  "payload": {
+    "url": null,
+    "test_type": "smoke",
+    "site": null,
+    "routes": null
+  },
+  "result_path": "/workspace/test-results/taas/dec048343bad499c8bb3014eea4b0c09-result.json",
+  "artifact_urls": {
+    "trace": {
+      "bucket": "taas-artifacts",
+      "key": "dec048343bad499c8bb3014eea4b0c09/dec048343bad499c8bb3014eea4b0c09-1-trace.zip",
+      "presigned_url": "http://minio:9000/taas-artifacts/dec048343bad499c8bb3014eea4b0c09/dec048343bad499c8bb3014eea4b0c09-1-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250919%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250919T092152Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=d8c678f578980b394fbb3f3153f5dbce3533638a50b76cc096a4ed44f1dbbe35"
+    }
+  }
+}

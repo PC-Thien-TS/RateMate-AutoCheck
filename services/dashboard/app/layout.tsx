@@ -16,8 +16,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <span> · </span>
           <a href="/admin/keys">Admin Keys</a>
         </nav>
+        {/* Queue stats (auto-refresh) */}
+        <StatsBar />
         {children}
       </body>
     </html>
   );
 }
+import StatsBar from "../components/StatsBar";

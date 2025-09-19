@@ -71,6 +71,24 @@ export default function Page({ params }: { params: { id: string } }) {
     }
   };
 
+  const retry = async () => {
+    try {
+      const res = await fetch(`${API}/api/jobs/${id}/retry`, { method: 'POST', headers: { 'x-api-key': API_KEY } });
+      const js = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(js));
+      window.location.href = `/sessions/${js.job_id}`;
+    } catch (e: any) { alert('Retry failed: ' + (e?.message || String(e))); }
+  };
+
+  const cancel = async () => {
+    try {
+      const res = await fetch(`${API}/api/jobs/${id}/cancel`, { method: 'POST', headers: { 'x-api-key': API_KEY } });
+      if (!res.ok) throw new Error(await res.text());
+      alert('Cancel requested');
+      location.reload();
+    } catch (e:any) { alert('Cancel failed: ' + (e?.message || String(e))); }
+  };
+
   return (
     <div>
       <a href="/">← Back</a>
@@ -79,6 +97,8 @@ export default function Page({ params }: { params: { id: string } }) {
       <div style={{ margin: '8px 0' }}>
         <button onClick={()=> location.reload()}>Refresh</button>
         <button onClick={rerun} style={{ marginLeft: 8 }}>Re-run</button>
+        <button onClick={retry} style={{ marginLeft: 8 }}>Retry</button>
+        <button onClick={cancel} style={{ marginLeft: 8 }}>Cancel</button>
         <a href={`/sessions/${id}/results`} style={{ marginLeft: 8 }}>Results History</a>
       </div>
 
