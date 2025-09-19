@@ -65,6 +65,18 @@ services:
       - postgres
       - minio
 
+  dashboard:
+    build:
+      context: ./services/dashboard
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_KEY=dev-key
+      - NEXT_PUBLIC_S3_PUBLIC=http://localhost:9000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
   perf:
     build:
       context: ./services/perf-lighthouse
@@ -108,4 +120,3 @@ services:
 volumes:
   pgdata: {}
   minio: {}
-
