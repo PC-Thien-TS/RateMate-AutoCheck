@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, Literal, List
 
 from fastapi import FastAPI, Depends, Header, HTTPException, status, UploadFile, File, Query
+from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
 from fastapi.responses import RedirectResponse
@@ -271,3 +272,73 @@ def get_result(result_id: int, _: bool = Depends(verify_api_key)):
     if not row:
         raise HTTPException(status_code=404, detail="Not found")
     return row
+
+
+def _extract_alerts(obj: dict) -> list:
+    try:
+        sec = obj.get("summary", {}).get("security") if "summary" in obj else obj.get("security")
+        alerts = sec.get("alerts") if isinstance(sec, dict) else None
+        return alerts if isinstance(alerts, list) else []
+    except Exception:
+        return []
+
+
+@app.get("/api/results/{result_id}/alerts.json")
+def result_alerts_json(result_id: int, _: bool = Depends(verify_api_key)):
+    row = dbmod.get_result(result_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    al = _extract_alerts(row) or []
+    return JSONResponse(content={"result_id": result_id, "count": len(al), "alerts": al})
+
+
+@app.get("/api/results/{result_id}/alerts.csv")
+def result_alerts_csv(result_id: int, _: bool = Depends(verify_api_key)):
+    row = dbmod.get_result(result_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    alerts = _extract_alerts(row)
+    cols = ["risk", "alert", "url", "evidence"]
+    # simple CSV
+    lines = [",".join(cols)]
+    def esc(s):
+        if s is None:
+            return ""
+        t = str(s).replace('"','""')
+        return f'"{t}"'
+    for a in alerts:
+        lines.append(
+            ",".join(esc(a.get(c)) for c in cols)
+        )
+    csv = "\n".join(lines) + "\n"
+    return Response(content=csv, media_type="text/csv")
+
+
+@app.get("/api/sessions/{session_id}/alerts.json")
+def session_latest_alerts_json(session_id: str, _: bool = Depends(verify_api_key)):
+    res = dbmod.latest_result(session_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="No results")
+    al = _extract_alerts(res) or []
+    return JSONResponse(content={"session_id": session_id, "result_id": res.get("id"), "count": len(al), "alerts": al})
+
+
+@app.get("/api/sessions/{session_id}/alerts.csv")
+def session_latest_alerts_csv(session_id: str, _: bool = Depends(verify_api_key)):
+    res = dbmod.latest_result(session_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="No results")
+    alerts = _extract_alerts(res)
+    cols = ["risk", "alert", "url", "evidence"]
+    lines = [",".join(cols)]
+    def esc(s):
+        if s is None:
+            return ""
+        t = str(s).replace('"','""')
+        return f'"{t}"'
+    for a in alerts:
+        lines.append(
+            ",".join(esc(a.get(c)) for c in cols)
+        )
+    csv = "\n".join(lines) + "\n"
+    return Response(content=csv, media_type="text/csv")
