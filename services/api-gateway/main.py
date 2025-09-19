@@ -308,6 +308,29 @@ def admin_create_key(data: dict, _: bool = Depends(_verify_admin)):
     return rec
 
 
+@app.patch("/api/admin/keys/{key_id}")
+def admin_update_key(key_id: int, data: dict, _: bool = Depends(_verify_admin)):
+    active = data.get("active")
+    rate = data.get("rate_limit_per_min")
+    try:
+        row = dbmod.update_api_key(key_id, active=active if active is not None else None, rate_limit_per_min=int(rate) if rate is not None else None)
+        if not row:
+            raise HTTPException(status_code=404, detail="Key not found")
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects")
+def list_projects(_: bool = Depends(verify_api_key)):
+    try:
+        return {"items": dbmod.list_projects()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/sessions/{session_id}/results")
 def list_session_results(session_id: str, _: bool = Depends(verify_api_key), limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     try:

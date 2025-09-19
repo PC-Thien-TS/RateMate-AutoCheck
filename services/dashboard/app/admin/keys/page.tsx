@@ -34,6 +34,24 @@ export default function KeysAdmin() {
     } catch (e: any) { setErr(e?.message || String(e)); }
   };
 
+  const toggleActive = async (id: number, active: boolean) => {
+    setErr(null);
+    try {
+      const res = await fetch(`${API}/api/admin/keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ active }) });
+      if (!res.ok) throw new Error(await res.text());
+      await load();
+    } catch (e:any) { setErr(e?.message || String(e)); }
+  };
+
+  const updateRate = async (id: number, rate: number) => {
+    setErr(null);
+    try {
+      const res = await fetch(`${API}/api/admin/keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ rate_limit_per_min: rate }) });
+      if (!res.ok) throw new Error(await res.text());
+      await load();
+    } catch (e:any) { setErr(e?.message || String(e)); }
+  };
+
   return (
     <div>
       <a href="/">← Back</a>
@@ -52,16 +70,23 @@ export default function KeysAdmin() {
         {created && <div style={{ marginTop:8 }}>API Key (copy now): <code>{created}</code></div>}
       </div>
       <table cellPadding={6} border={1} style={{ borderCollapse:'collapse', width:'100%' }}>
-        <thead><tr><th>ID</th><th>Name</th><th>Project</th><th>Rate/min</th><th>Active</th><th>Created</th></tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>Project</th><th>Rate/min</th><th>Active</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>
           {items.map((k:any) => (
             <tr key={k.id}>
               <td>{k.id}</td>
               <td>{k.name}</td>
               <td>{k.project||''}</td>
-              <td>{k.rate_limit_per_min}</td>
+              <td>
+                {k.rate_limit_per_min}
+                <button onClick={()=>updateRate(k.id, Math.max(0, (k.rate_limit_per_min||60)-10))} style={{ marginLeft:6 }}>-10</button>
+                <button onClick={()=>updateRate(k.id, (k.rate_limit_per_min||60)+10)} style={{ marginLeft:6 }}>+10</button>
+              </td>
               <td>{String(k.active)}</td>
               <td>{new Date(k.created_at).toLocaleString()}</td>
+              <td>
+                <button onClick={()=>toggleActive(k.id, !k.active)}>{k.active? 'Disable':'Enable'}</button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -69,4 +94,3 @@ export default function KeysAdmin() {
     </div>
   );
 }
-

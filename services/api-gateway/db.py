@@ -162,3 +162,29 @@ def verify_api_key(raw_key: str) -> dict | None:
             if not rec.get("active"):
                 return None
             return rec
+
+
+def update_api_key(key_id: int, active: bool | None = None, rate_limit_per_min: int | None = None) -> dict | None:
+    sets = []
+    args: list = []
+    if active is not None:
+        sets.append("active=%s"); args.append(active)
+    if rate_limit_per_min is not None:
+        sets.append("rate_limit_per_min=%s"); args.append(rate_limit_per_min)
+    if not sets:
+        return None
+    args.append(key_id)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(f"update api_keys set {', '.join(sets)} where id=%s returning id, name, project, rate_limit_per_min, active, created_at", args)
+            row = cur.fetchone()
+        conn.commit()
+    return dict(row) if row else None
+
+
+def list_projects() -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("select project, count(*) as sessions from test_sessions group by project order by sessions desc nulls last")
+            rows = cur.fetchall() or []
+            return [dict(r) for r in rows]
