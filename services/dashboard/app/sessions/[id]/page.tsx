@@ -74,6 +74,7 @@ export default function Page({ params }: { params: { id: string } }) {
       <div style={{ margin: '8px 0' }}>
         <button onClick={()=> location.reload()}>Refresh</button>
         <button onClick={rerun} style={{ marginLeft: 8 }}>Re-run</button>
+        <a href={`/sessions/${id}/results`} style={{ marginLeft: 8 }}>Results History</a>
       </div>
 
       <h3>Summary</h3>
@@ -112,7 +113,7 @@ export default function Page({ params }: { params: { id: string } }) {
           <h3>Artifact URLs</h3>
           <ul>
             {Object.entries(job.artifact_urls).map(([k,v]: any) => (
-              <li key={k}><a href={rewriteUrl(v?.presigned_url)} target="_blank" rel="noreferrer">{k}</a></li>
+              <li key={k}><a href={rewriteUrl(v?.presigned_url) || `${API}/api/artifacts/${id}/${k}`} target="_blank" rel="noreferrer">{k}</a></li>
             ))}
           </ul>
         </div>

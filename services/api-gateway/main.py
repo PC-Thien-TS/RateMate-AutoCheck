@@ -7,6 +7,7 @@ from typing import Optional, Literal, List
 from fastapi import FastAPI, Depends, Header, HTTPException, status, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
+from fastapi.responses import RedirectResponse
 from rq import Queue
 from redis import Redis
 import db as dbmod
@@ -77,6 +78,7 @@ class JobStatusResponse(BaseModel):
     result_path: Optional[str] = None
     error: Optional[str] = None
     payload: Optional[dict] = None
+    artifact_urls: Optional[dict] = None
 
 
 # ---------- App ----------
@@ -185,6 +187,7 @@ def get_job(job_id: str, _: bool = Depends(verify_api_key)):
         result_path=str(data.get("result_path") or ""),
         error=data.get("error"),
         payload=data.get("payload") if isinstance(data.get("payload"), dict) else None,
+        artifact_urls=data.get("artifact_urls") if isinstance(data.get("artifact_urls"), dict) else None,
     )
 
 
@@ -201,6 +204,22 @@ def healthz():
         return {"ok": True, "db": db_ok}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/artifacts/{job_id}/{name}")
+def get_artifact(job_id: str, name: str, _: bool = Depends(verify_api_key)):
+    """Redirect to the presigned URL stored in job status JSON.
+    This acts as a simple download/stream endpoint for dashboard/CI.
+    """
+    path = RESULTS_DIR / f"{job_id}.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Job not found")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    arts = data.get("artifact_urls") or {}
+    info = arts.get(name)
+    if isinstance(info, dict) and info.get("presigned_url"):
+        return RedirectResponse(url=str(info["presigned_url"]))
+    raise HTTPException(status_code=404, detail="Artifact not found")
 
 
 # -------- Sessions API (for dashboard) --------
