@@ -14,6 +14,7 @@ import boto3
 from botocore.client import Config
 import psycopg2
 from psycopg2.extras import Json
+import re
 
 
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
@@ -331,8 +332,21 @@ def run_web_test(job_id: str, payload: Dict):
             time.sleep(2)
             # Fetch alerts
             alerts = zap.core.alerts(baseurl=target) or []
-            # Exclude noisy static chunks
-            alerts = [a for a in alerts if '/_next/static/' not in (a.get('url') or '')]
+            # Exclude noisy static chunks and user-provided excludes
+            excludes = [r"/_next/static/"]
+            ex_env = os.getenv('ZAP_EXCLUDE_REGEX')
+            if ex_env:
+                try:
+                    excludes += [x for x in ex_env.split(',') if x.strip()]
+                except Exception:
+                    pass
+            excl = [re.compile(e) for e in excludes]
+            def _excluded(u: str) -> bool:
+                try:
+                    return any(rx.search(u or '') for rx in excl)
+                except Exception:
+                    return False
+            alerts = [a for a in alerts if not _excluded(a.get('url') or '')]
             # Summarize by risk
             counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
             items = []

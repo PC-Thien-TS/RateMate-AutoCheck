@@ -13,6 +13,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/run">Run Test</a>
           <span> · </span>
           <a href="/run-mobile">Run Mobile Analyze</a>
+          <span> · </span>
+          <a href="/admin/keys">Admin Keys</a>
         </nav>
         {children}
       </body>

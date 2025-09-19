@@ -52,6 +52,10 @@ export default function Page({ params }: { params: { id: string } }) {
   const screenshotUrl = rewriteUrl(art.screenshot?.presigned_url || art.screenshot_1?.presigned_url);
   const perfUrl = rewriteUrl(art.perf_html?.presigned_url);
   const zapUrl = rewriteUrl(art.zap_html?.presigned_url);
+  const latestSummary = sess?.latest_result?.summary || {};
+  const perfScore = latestSummary?.performance?.performance_score;
+  const zapCounts = latestSummary?.security?.counts;
+  const mob = latestSummary && (latestSummary.risk_score || latestSummary.permissions || latestSummary.endpoints) ? latestSummary : null;
 
   const rerun = async () => {
     try {
@@ -105,6 +109,34 @@ export default function Page({ params }: { params: { id: string } }) {
         <div>
           <h3>ZAP Report</h3>
           <iframe src={zapUrl} style={{ width: '100%', height: 600, border: '1px solid #444' }} />
+        </div>
+      )}
+
+      {(typeof perfScore === 'number' || zapCounts) && (
+        <div>
+          <h3>Quality Summary</h3>
+          <pre style={{ whiteSpace:'pre-wrap', background:'#111', color:'#ddd', padding:10 }}>
+            {JSON.stringify({ performance_score: perfScore, zap: zapCounts }, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {mob && (
+        <div>
+          <h3>Mobile Analyze</h3>
+          <div>Risk Score: {mob.risk_score ?? 'n/a'}</div>
+          {mob.permissions && (
+            <details>
+              <summary>Permissions ({Array.isArray(mob.permissions)? mob.permissions.length: 'n/a'})</summary>
+              <pre style={{ whiteSpace:'pre-wrap' }}>{JSON.stringify(mob.permissions, null, 2)}</pre>
+            </details>
+          )}
+          {mob.endpoints && (
+            <details>
+              <summary>Endpoints ({Array.isArray(mob.endpoints)? mob.endpoints.length: 'n/a'})</summary>
+              <pre style={{ whiteSpace:'pre-wrap' }}>{JSON.stringify(mob.endpoints, null, 2)}</pre>
+            </details>
+          )}
         </div>
       )}
 
