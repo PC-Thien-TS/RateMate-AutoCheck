@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "dev-key";
@@ -10,9 +10,16 @@ export default function RunPage() {
   const [site, setSite] = useState("");
   const [url, setUrl] = useState("");
   const [routes, setRoutes] = useState("");
+  const [project, setProject] = useState("");
+  const [projects, setProjects] = useState<any[]>([]);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API}/api/projects`, { headers: { 'x-api-key': API_KEY }})
+      .then(r=>r.json()).then(js => setProjects(js.items||[])).catch(()=>{});
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setError(null); setLoading(true); setJobId(null);
@@ -21,6 +28,7 @@ export default function RunPage() {
       if (site) body.site = site;
       if (url) body.url = url;
       if (routes) body.routes = routes.split(',').map(s => s.trim()).filter(Boolean);
+      if (project) body.project = project;
       const res = await fetch(`${API}/api/test/web`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
         body: JSON.stringify(body)
@@ -49,6 +57,13 @@ export default function RunPage() {
           </select>
         </div>
         <div style={{ marginBottom: 8 }}>
+          <label>Project (optional): </label>
+          <select value={project} onChange={e=>setProject(e.target.value)}>
+            <option value="">(none)</option>
+            {projects.map((p:any)=> (<option key={p.project} value={p.project}>{p.project}</option>))}
+          </select>
+        </div>
+        <div style={{ marginBottom: 8 }}>
           <label>Site (optional): </label>
           <input value={site} onChange={e=>setSite(e.target.value)} placeholder="ratemate" />
         </div>
@@ -73,4 +88,3 @@ export default function RunPage() {
     </div>
   );
 }
-
