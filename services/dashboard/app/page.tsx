@@ -33,6 +33,12 @@ export default function Home() {
   const { data, loading, error } = useSessions({ limit, offset, project, kind, status, test_type: testType, since, until });
   const [jobs, setJobs] = useState<Record<string, any>>({});
   const [auto, setAuto] = useState(true);
+  const [projects, setProjects] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch(`${API}/api/projects`, { headers: { 'x-api-key': API_KEY } })
+      .then(r=>r.json()).then(js=> setProjects(js.items||[])).catch(()=>{});
+  }, []);
 
   // Enrich with job status for perf/security/links; poll if any pending
   useEffect(() => {
@@ -75,10 +81,39 @@ export default function Home() {
   return (
     <div>
       <section style={{ marginBottom: 12 }}>
-        <label>Project: <input value={project} onChange={e=>setProject(e.target.value)} /></label>
-        <label style={{ marginLeft: 12 }}>Kind: <input placeholder="web/mobile" value={kind} onChange={e=>setKind(e.target.value)} /></label>
-        <label style={{ marginLeft: 12 }}>Status: <input placeholder="completed/failed" value={status} onChange={e=>setStatus(e.target.value)} /></label>
-        <label style={{ marginLeft: 12 }}>Type: <input placeholder="smoke/performance/security/auto" value={testType} onChange={e=>setTestType(e.target.value)} /></label>
+        <label>Project: 
+          <select value={project} onChange={e=>setProject(e.target.value)}>
+            <option value="">(all)</option>
+            {projects.map((p:any)=> (<option key={p.project} value={p.project}>{p.project} ({p.sessions})</option>))}
+          </select>
+        </label>
+        <label style={{ marginLeft: 12 }}>Kind: 
+          <select value={kind} onChange={e=>setKind(e.target.value)}>
+            <option value="">(all)</option>
+            <option value="web">web</option>
+            <option value="mobile">mobile</option>
+          </select>
+        </label>
+        <label style={{ marginLeft: 12 }}>Status: 
+          <select value={status} onChange={e=>setStatus(e.target.value)}>
+            <option value="">(all)</option>
+            <option value="queued">queued</option>
+            <option value="running">running</option>
+            <option value="completed">completed</option>
+            <option value="failed">failed</option>
+            <option value="canceled">canceled</option>
+          </select>
+        </label>
+        <label style={{ marginLeft: 12 }}>Type: 
+          <select value={testType} onChange={e=>setTestType(e.target.value)}>
+            <option value="">(all)</option>
+            <option value="smoke">smoke</option>
+            <option value="auto">auto</option>
+            <option value="performance">performance</option>
+            <option value="security">security</option>
+            <option value="analyze">analyze</option>
+          </select>
+        </label>
         <label style={{ marginLeft: 12 }}>Since: <input type="datetime-local" value={since} onChange={e=>setSince(e.target.value)} /></label>
         <label style={{ marginLeft: 12 }}>Until: <input type="datetime-local" value={until} onChange={e=>setUntil(e.target.value)} /></label>
         <label style={{ marginLeft: 12 }}>Limit: <input type="number" value={limit} onChange={e=>setLimit(parseInt(e.target.value||"20"))} style={{ width: 60 }} /></label>

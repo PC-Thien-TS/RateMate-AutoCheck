@@ -1,0 +1,71 @@
+name: TaaS PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  TAAS_API_URL: ${{ secrets.TAAS_API_URL }}
+  TAAS_API_KEY: ${{ secrets.TAAS_API_KEY }}
+
+jobs:
+  run-taas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate env
+        run: |
+          if [ -z "${TAAS_API_URL}" ] || [ -z "${TAAS_API_KEY}" ]; then
+            echo "Missing TAAS_API_URL/TAAS_API_KEY" >&2; exit 1; fi
+
+      - name: Enqueue performance
+        id: perf
+        run: |
+          BODY='{"url":"${{ secrets.TAAS_TARGET_URL }}","test_type":"performance"}'
+          echo "$BODY" > perf-body.json
+          curl -sS -X POST "$TAAS_API_URL/api/test/web" -H "x-api-key: $TAAS_API_KEY" -H "Content-Type: application/json" -d @perf-body.json > perf.json
+          cat perf.json
+          echo "job_id=$(jq -r .job_id perf.json)" >> $GITHUB_OUTPUT
+
+      - name: Enqueue security
+        id: sec
+        run: |
+          BODY='{"url":"${{ secrets.TAAS_TARGET_URL }}","test_type":"security"}'
+          echo "$BODY" > sec-body.json
+          curl -sS -X POST "$TAAS_API_URL/api/test/web" -H "x-api-key: $TAAS_API_KEY" -H "Content-Type: application/json" -d @sec-body.json > sec.json
+          cat sec.json
+          echo "job_id=$(jq -r .job_id sec.json)" >> $GITHUB_OUTPUT
+
+      - name: Poll jobs
+        id: poll
+        run: |
+          poll() { id=$1; until [ "$(curl -sS "$TAAS_API_URL/api/jobs/$id" -H "x-api-key: $TAAS_API_KEY" | jq -r .status)" != "queued" -a "$(curl -sS "$TAAS_API_URL/api/jobs/$id" -H "x-api-key: $TAAS_API_KEY" | jq -r .status)" != "running" ]; do sleep 3; done; curl -sS "$TAAS_API_URL/api/jobs/$id" -H "x-api-key: $TAAS_API_KEY"; }
+          poll ${{ steps.perf.outputs.job_id }} > perf-final.json
+          poll ${{ steps.sec.outputs.job_id }} > sec-final.json
+          echo "perf=$(cat perf-final.json)" >> $GITHUB_OUTPUT
+          echo "sec=$(cat sec-final.json)" >> $GITHUB_OUTPUT
+
+      - name: Prepare comment
+        id: prep
+        run: |
+          PERF_SCORE=$(jq -r '.performance.performance_score // .summary.performance.performance_score // "n/a"' perf-final.json 2>/dev/null || echo n/a)
+          ZAP_H=$(jq -r '.security.counts.High // .summary.security.counts.High // 0' sec-final.json 2>/dev/null || echo 0)
+          ZAP_M=$(jq -r '.security.counts.Medium // .summary.security.counts.Medium // 0' sec-final.json 2>/dev/null || echo 0)
+          PURL=$(jq -r '.artifact_urls.perf_html.presigned_url // ""' perf-final.json)
+          ZURL=$(jq -r '.artifact_urls.zap_html.presigned_url // ""' sec-final.json)
+          printf "TAAS results:\n- Performance score: %s\n- ZAP alerts: H%s/M%s\n\n[Perf report](%s) | [ZAP report](%s)\n" "$PERF_SCORE" "$ZAP_H" "$ZAP_M" "$PURL" "$ZURL" > comment.md
+          cat comment.md
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment.md', 'utf8');
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+

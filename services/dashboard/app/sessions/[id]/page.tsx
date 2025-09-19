@@ -52,6 +52,7 @@ export default function Page({ params }: { params: { id: string } }) {
   const screenshotUrl = rewriteUrl(art.screenshot?.presigned_url || art.screenshot_1?.presigned_url);
   const perfUrl = rewriteUrl(art.perf_html?.presigned_url);
   const zapUrl = rewriteUrl(art.zap_html?.presigned_url);
+  const mobsfUrl = rewriteUrl(art.mobsf_html?.presigned_url);
   const latestSummary = sess?.latest_result?.summary || {};
   const perfScore = latestSummary?.performance?.performance_score;
   const zapCounts = latestSummary?.security?.counts;
@@ -109,6 +110,13 @@ export default function Page({ params }: { params: { id: string } }) {
         <div>
           <h3>ZAP Report</h3>
           <iframe src={zapUrl} style={{ width: '100%', height: 600, border: '1px solid #444' }} />
+        </div>
+      )}
+
+      {mobsfUrl && (
+        <div>
+          <h3>MobSF Report</h3>
+          <iframe src={mobsfUrl} style={{ width: '100%', height: 600, border: '1px solid #444' }} />
         </div>
       )}
 

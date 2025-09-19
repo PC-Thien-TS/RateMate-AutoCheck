@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
 from fastapi.responses import RedirectResponse
 from rq import Queue
+from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
 from redis import Redis
 import db as dbmod
 
@@ -228,6 +229,60 @@ def healthz():
         return {"ok": True, "db": db_ok}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/stats")
+def stats(_: bool = Depends(verify_api_key)):
+    try:
+        q = get_queue()
+        conn = _redis_conn()
+        started = StartedJobRegistry(q.name, connection=conn)
+        finished = FinishedJobRegistry(q.name, connection=conn)
+        failed = FailedJobRegistry(q.name, connection=conn)
+        return {
+            "queue": q.name,
+            "queued": q.count,
+            "started": len(started),
+            "finished": len(finished),
+            "failed": len(failed),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, _: bool = Depends(verify_api_key)):
+    # cooperative cancel: mark a Redis key that workers check
+    conn = _redis_conn()
+    conn.setex(f"cancel:{job_id}", 3600, "1")
+    # reflect in status file
+    path = RESULTS_DIR / f"{job_id}.json"
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {"job_id": job_id}
+    else:
+        data = {"job_id": job_id}
+    data["status"] = "cancel_requested"
+    (RESULTS_DIR / f"{job_id}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/jobs/{job_id}/retry", response_model=JobEnqueueResponse)
+def retry_job(job_id: str, _: bool = Depends(verify_api_key)):
+    path = RESULTS_DIR / f"{job_id}.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Job not found")
+    data = json.loads(path.read_text(encoding="utf-8")) or {}
+    payload = data.get("payload") or {}
+    kind = str(data.get("kind") or "web")
+    new_id = uuid.uuid4().hex
+    _write_status(new_id, payload, status="queued", kind=kind)
+    q = get_queue()
+    target = "tasks.run_mobile_test" if kind == "mobile" else "tasks.run_web_test"
+    q.enqueue(target, new_id, payload, job_id=new_id)
+    return JobEnqueueResponse(job_id=new_id, status="queued")
 
 
 @app.get("/api/artifacts/{job_id}/{name}")

@@ -15,11 +15,30 @@ from botocore.client import Config
 import psycopg2
 from psycopg2.extras import Json
 import re
+from redis import Redis
 
 
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 WORKSPACE = Path("/workspace").resolve()
+REDIS_URL = os.getenv("RQ_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+def _redis() -> Redis | None:
+    try:
+        return Redis.from_url(REDIS_URL)
+    except Exception:
+        return None
+
+
+def _is_canceled(job_id: str) -> bool:
+    r = _redis()
+    if not r:
+        return False
+    try:
+        return bool(r.get(f"cancel:{job_id}"))
+    except Exception:
+        return False
 
 
 def _update(job_id: str, patch: Dict):
@@ -187,6 +206,9 @@ def run_web_test(job_id: str, payload: Dict):
     case_results = []
     all_passed = True
     t0 = time.time()
+    if _is_canceled(job_id):
+      _update(job_id, {"status": "canceled", "error": "canceled"}); return
+
     with sync_playwright() as p:
         # Load optional assertions map from site config
         assertions_map = {}
@@ -202,6 +224,8 @@ def run_web_test(job_id: str, payload: Dict):
             passed = False
             err = None
             missing: List[str] = []
+            if _is_canceled(job_id):
+                _update(job_id, {"status": "canceled", "error": "canceled"}); return
             try:
                 browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"]) 
                 context = browser.new_context(viewport={"width": 1366, "height": 900})
@@ -262,7 +286,10 @@ def run_web_test(job_id: str, payload: Dict):
     perf_reason = []
     if test_type == "performance" and urls:
         try:
-            r = requests.post("http://perf:3001/run", json={"url": urls[0], "html": True}, timeout=240)
+            if _is_canceled(job_id):
+                _update(job_id, {"status": "canceled", "error": "canceled"}); return
+            perf_timeout = int(os.getenv("PERF_TIMEOUT_SEC", "240"))
+            r = requests.post("http://perf:3001/run", json={"url": urls[0], "html": True}, timeout=perf_timeout)
             if r.status_code < 400:
                 pj = r.json()
                 perf_result = {
@@ -312,20 +339,26 @@ def run_web_test(job_id: str, payload: Dict):
             # Start spider
             sid = zap.spider.scan(target)
             # Wait spider
+            zap_max = int(os.getenv("ZAP_MAX_SECONDS", "180"))
+            t0z = time.time()
             while True:
                 status = int(zap.spider.status(sid))
                 if status >= 100:
                     break
                 time.sleep(1)
+                if time.time() - t0z > zap_max or _is_canceled(job_id):
+                    break
             # Ajax spider for SPA
             try:
                 zap.ajaxSpider.scan(target)
                 t0_ajax = time.time()
                 while True:
                     st = zap.ajaxSpider.status()
-                    if st == 'stopped' or (time.time() - t0_ajax) > 60:
+                    if st == 'stopped' or (time.time() - t0_ajax) > min(60, zap_max):
                         break
                     time.sleep(1)
+                    if time.time() - t0z > zap_max or _is_canceled(job_id):
+                        break
             except Exception:
                 pass
             # Passive scanning usually runs automatically, give it a moment
@@ -470,6 +503,17 @@ def run_web_test(job_id: str, payload: Dict):
         artifacts['perf_html'] = _upload(Path(perf_result['report_path']))
     if zap_result and zap_result.get('report_path'):
         artifacts['zap_html'] = _upload(Path(zap_result['report_path']))
+    # MobSF HTML if available
+    if res := result.get('summary') if False else None:
+        pass
+    try:
+        if result.get('report_path'):
+            artifacts['mobsf_html'] = _upload(Path(result['report_path']))
+    except Exception:
+        pass
+
+    if _is_canceled(job_id):
+        _update(job_id, {"status": "canceled", "error": "canceled"}); return
 
     final_pass = all_passed and (perf_ok if test_type == "performance" else True) and (zap_ok if test_type == "security" else True)
     final = {"status": "completed" if final_pass else "failed", "result_path": str(out_path)}
@@ -524,8 +568,11 @@ def run_mobile_test(job_id: str, payload: Dict):
     else:
         # Placeholder for E2E (Appium/FTL) to be implemented later
         res = {"test_type": test_type, "analyzer": "Appium", "summary": "E2E executed on device"}
+    # attach job_id to allow proper naming of MobSF report
+    res_with_id = dict(res)
+    res_with_id['job_id'] = job_id
     out_path = RESULTS_DIR / f"{job_id}-result.json"
-    out_path.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(json.dumps(res_with_id, ensure_ascii=False, indent=2), encoding="utf-8")
     status = "completed" if res.get("passed", True) else "failed"
     final = {"status": status, "result_path": str(out_path)}
     if res.get("error"):
@@ -593,6 +640,21 @@ def _mobile_analyze_mobsf(payload: Dict) -> Dict:
         endpoints = report_json.get("urls") or report_json.get("domains")
         risk = report_json.get("risk_score") or report_json.get("score")
 
+        # Try to get HTML report (if available)
+        report_path = None
+        try:
+            rh = requests.post(f"{mobsf_url}/api/v1/report", headers=headers, data={"hash": hashv}, timeout=300)
+            if rh.status_code < 400 and rh.text:
+                html_path = RESULTS_DIR / f"{payload.get('job_id','mobsf')}-mobsf.html"
+                # job_id not in scope here; caller will rename when integrating
+                # fallback: use epoch time in filename if not set by caller
+                if 'job_id' not in payload:
+                    html_path = RESULTS_DIR / f"mobsf-{int(time.time())}.html"
+                html_path.write_text(rh.text, encoding="utf-8")
+                report_path = str(html_path)
+        except Exception:
+            report_path = None
+
         return {
             "analyzer": "MobSF",
             "configured": True,
@@ -603,6 +665,7 @@ def _mobile_analyze_mobsf(payload: Dict) -> Dict:
             "risk_score": risk,
             "permissions": perms,
             "endpoints": endpoints,
+            "report_path": report_path,
         }
     except Exception as e:
         return {"analyzer": "MobSF", "configured": True, "passed": False, "error": str(e)}
