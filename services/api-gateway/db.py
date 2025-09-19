@@ -1,6 +1,7 @@
 import os
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
+import hashlib
 
 
 def get_conn():
@@ -31,6 +32,17 @@ def ensure_schema():
       summary jsonb,
       created_at timestamptz default now()
     );
+
+    create table if not exists api_keys (
+      id bigserial primary key,
+      name text,
+      project text,
+      key_hash text not null,
+      rate_limit_per_min int default 60,
+      active boolean default true,
+      created_at timestamptz default now()
+    );
+    create index if not exists idx_api_keys_hash on api_keys(key_hash);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -109,3 +121,44 @@ def get_result(result_id: int):
             cur.execute("select id, session_id, created_at, summary from test_results where id=%s", (result_id,))
             row = cur.fetchone()
             return dict(row) if row else None
+
+
+def _hash_key(raw: str) -> str:
+    return hashlib.sha256((raw or "").encode("utf-8")).hexdigest()
+
+
+def insert_api_key(name: str, project: str | None, raw_key: str, rate_limit_per_min: int = 60) -> dict:
+    key_hash = _hash_key(raw_key)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "insert into api_keys(name, project, key_hash, rate_limit_per_min, active) values (%s,%s,%s,%s,true) returning id, name, project, rate_limit_per_min, active",
+                (name, project, key_hash, rate_limit_per_min),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return dict(row) if row else {}
+
+
+def list_api_keys(limit: int = 100) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("select id, name, project, rate_limit_per_min, active, created_at from api_keys order by id desc limit %s", (limit,))
+            rows = cur.fetchall() or []
+            return [dict(r) for r in rows]
+
+
+def verify_api_key(raw_key: str) -> dict | None:
+    if not raw_key:
+        return None
+    key_hash = _hash_key(raw_key)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("select id, name, project, rate_limit_per_min, active from api_keys where key_hash=%s", (key_hash,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            rec = dict(row)
+            if not rec.get("active"):
+                return None
+            return rec

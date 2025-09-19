@@ -23,6 +23,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 QUEUE_NAME = os.getenv("TAAS_QUEUE_NAME", "taas")
 API_KEY = os.getenv("API_KEY", "dev-key")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 
 def _redis_conn() -> Redis:
@@ -34,10 +35,31 @@ def get_queue() -> Queue:
 
 
 def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
-    if not API_KEY:
-        return True  # disabled
-    if x_api_key != API_KEY:
+    # Accept either legacy global API_KEY or DB-backed api_keys
+    if API_KEY and x_api_key == API_KEY:
+        return True
+    # DB verify + basic rate limit per key
+    try:
+        rec = dbmod.verify_api_key(x_api_key or "")
+    except Exception:
+        rec = None
+    if not rec:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    # Rate limit (per minute) using Redis
+    try:
+        limit = int(rec.get("rate_limit_per_min") or 60)
+        if limit > 0:
+            minute = int(__import__('time').time() // 60)
+            key = f"rl:{rec['id']}:{minute}"
+            val = _redis_conn().incr(key)
+            if val == 1:
+                _redis_conn().expire(key, 60)
+            if val > limit:
+                raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     return True
 
 
@@ -47,6 +69,7 @@ class WebTestRequest(BaseModel):
     test_type: Literal["smoke", "full", "performance", "security", "auto"] = "smoke"
     site: Optional[str] = None
     routes: Optional[List[str]] = None
+    project: Optional[str] = None
 
 
 class MobileDevice(BaseModel):
@@ -135,7 +158,7 @@ def enqueue_web(req: WebTestRequest, _: bool = Depends(verify_api_key)):
     payload = req.model_dump(mode="json")
     _write_status(job_id, payload, status="queued", kind="web")
     try:
-        dbmod.insert_session(job_id, kind="web", test_type=req.test_type, project=req.site or None, status="queued")
+        dbmod.insert_session(job_id, kind="web", test_type=req.test_type, project=(req.project or req.site) or None, status="queued")
     except Exception:
         pass
     q = get_queue()
@@ -255,6 +278,34 @@ def get_session(session_id: str, _: bool = Depends(verify_api_key)):
     except Exception:
         res = None
     return {"session": sess, "latest_result": res}
+
+
+# -------- Admin: API Keys --------
+
+def _verify_admin(x_admin_token: Optional[str] = Header(default=None)):
+    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+    return True
+
+
+@app.get("/api/admin/keys")
+def admin_list_keys(_: bool = Depends(_verify_admin)):
+    try:
+        return {"items": dbmod.list_api_keys()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/keys")
+def admin_create_key(data: dict, _: bool = Depends(_verify_admin)):
+    name = str(data.get("name") or "token")
+    project = data.get("project")
+    rate = int(data.get("rate_limit_per_min") or 60)
+    # Generate random token
+    raw = uuid.uuid4().hex + uuid.uuid4().hex
+    rec = dbmod.insert_api_key(name=name, project=project, raw_key=raw, rate_limit_per_min=rate)
+    rec["api_key"] = raw
+    return rec
 
 
 @app.get("/api/sessions/{session_id}/results")

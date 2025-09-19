@@ -27,14 +27,14 @@ export default function DiffPage({ params, searchParams }: { params: { id: strin
     if (l && r) load();
   }, [l, r]);
 
-  const perf = (x:any) => x?.summary?.performance?.performance_score;
-  const zapCounts = (x:any) => x?.summary?.security?.counts || {};
-  const alerts = (x:any) => (x?.summary?.security?.alerts || []).map((a:any)=> `${a.risk}:${a.alert}|${a.url}`);
+  const perf = (x:any) => x?.summary?.performance?.performance_score as number | undefined;
+  const zapCounts = (x:any) => (x?.summary?.security?.counts || {}) as Record<string, number>;
+  const alerts = (x:any): string[] => (x?.summary?.security?.alerts || []).map((a:any)=> `${a.risk}:${a.alert}|${a.url}`) as string[];
 
-  const leftAlerts = new Set(alerts(left));
-  const rightAlerts = new Set(alerts(right));
-  const added = [...rightAlerts].filter(x=> !leftAlerts.has(x));
-  const removed = [...leftAlerts].filter(x=> !rightAlerts.has(x));
+  const leftAlerts: Set<string> = new Set<string>(alerts(left));
+  const rightAlerts: Set<string> = new Set<string>(alerts(right));
+  const added: string[] = Array.from(rightAlerts).filter((x: string) => !leftAlerts.has(x));
+  const removed: string[] = Array.from(leftAlerts).filter((x: string) => !rightAlerts.has(x));
 
   return (
     <div>
@@ -53,11 +53,10 @@ export default function DiffPage({ params, searchParams }: { params: { id: strin
       </div>
       <div style={{ marginTop: 12 }}>
         <h3>Alerts Added</h3>
-        <ul>{added.map((x,i)=>(<li key={i}>{x}</li>))}</ul>
+        <ul>{added.map((x: string, i: number)=>(<li key={i}>{x}</li>))}</ul>
         <h3>Alerts Removed</h3>
-        <ul>{removed.map((x,i)=>(<li key={i}>{x}</li>))}</ul>
+        <ul>{removed.map((x: string, i: number)=>(<li key={i}>{x}</li>))}</ul>
       </div>
     </div>
   );
 }
-
