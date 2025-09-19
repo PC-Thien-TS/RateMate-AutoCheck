@@ -1,0 +1,16 @@
+{
+  "job_id": "65811fa8bcd64e7b820fd56981538af2",
+  "status": "completed",
+  "kind": "mobile",
+  "payload": {
+    "apk_url": null,
+    "ipa_url": null,
+    "apk_path": "/workspace/test-results/taas/uploads/c99881833e3846a7bf2f9619702dee44.apk",
+    "ipa_path": null,
+    "deep_link": null,
+    "test_type": "analyze",
+    "device": null,
+    "project": null
+  },
+  "result_path": "/workspace/test-results/taas/65811fa8bcd64e7b820fd56981538af2-result.json"
+}

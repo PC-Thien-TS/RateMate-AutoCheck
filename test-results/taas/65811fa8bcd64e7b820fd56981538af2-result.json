@@ -1,0 +1,6 @@
+{
+  "analyzer": "MobSF",
+  "configured": false,
+  "passed": true,
+  "summary": "MobSF not configured; skipped static analysis"
+}

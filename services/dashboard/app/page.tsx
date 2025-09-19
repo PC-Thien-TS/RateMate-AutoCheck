@@ -31,6 +31,46 @@ export default function Home() {
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
   const { data, loading, error } = useSessions({ limit, offset, project, kind, status, test_type: testType, since, until });
+  const [jobs, setJobs] = useState<Record<string, any>>({});
+  const [auto, setAuto] = useState(true);
+
+  // Enrich with job status for perf/security/links; poll if any pending
+  useEffect(() => {
+    let timer: any;
+    const load = async () => {
+      if (!data?.items) return;
+      const ids: string[] = data.items.map((s: any) => s.id);
+      try {
+        const entries = await Promise.all(ids.map(async (id) => {
+          const res = await fetch(`${API}/api/jobs/${id}`, { headers: { 'x-api-key': API_KEY } });
+          if (!res.ok) return [id, null] as const;
+          const j = await res.json();
+          return [id, j] as const;
+        }));
+        const map: Record<string, any> = {};
+        for (const [id, j] of entries) map[id] = j;
+        setJobs(map);
+        const hasPending = Object.values(map).some((j: any) => j && (j.status === 'queued' || j.status === 'running'));
+        if (auto && hasPending) timer = setTimeout(load, 3000);
+      } catch (_) {}
+    };
+    load();
+    return () => { if (timer) clearTimeout(timer); };
+  }, [JSON.stringify(data?.items), auto]);
+
+  const rerun = async (id: string) => {
+    try {
+      const j = jobs[id];
+      if (!j) return alert('No job payload');
+      const payload = j.payload || {};
+      const kind = (j.kind || 'web').toLowerCase();
+      const path = kind === 'mobile' ? '/api/test/mobile' : '/api/test/web';
+      const res = await fetch(`${API}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY }, body: JSON.stringify(payload) });
+      const js = await res.json();
+      if (!res.ok) throw new Error(JSON.stringify(js));
+      window.location.href = `/sessions/${js.job_id}`;
+    } catch (e: any) { alert('Re-run failed: ' + (e?.message || String(e))); }
+  };
 
   return (
     <div>
@@ -43,6 +83,7 @@ export default function Home() {
         <label style={{ marginLeft: 12 }}>Until: <input type="datetime-local" value={until} onChange={e=>setUntil(e.target.value)} /></label>
         <label style={{ marginLeft: 12 }}>Limit: <input type="number" value={limit} onChange={e=>setLimit(parseInt(e.target.value||"20"))} style={{ width: 60 }} /></label>
         <button onClick={() => setOffset(0)} style={{ marginLeft: 12 }}>Apply</button>
+        <label style={{ marginLeft: 12 }}><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)} /> Auto-refresh</label>
       </section>
 
       {loading && <p>Loading…</p>}
@@ -50,19 +91,37 @@ export default function Home() {
 
       <table cellPadding={6} border={1} style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr><th>ID</th><th>Project</th><th>Kind</th><th>Type</th><th>Status</th><th>Created</th></tr>
+          <tr><th>ID</th><th>Project</th><th>Kind</th><th>Type</th><th>Status</th><th>Perf</th><th>ZAP</th><th>Reports</th><th>Created</th><th>Actions</th></tr>
         </thead>
         <tbody>
-        {data?.items?.map((s: any) => (
-          <tr key={s.id}>
-            <td><a href={`/sessions/${s.id}`}>{s.id.slice(0,8)}…</a></td>
-            <td>{s.project || ''}</td>
-            <td>{s.kind}</td>
-            <td>{s.test_type}</td>
-            <td>{s.status}</td>
-            <td>{new Date(s.created_at).toLocaleString()}</td>
-          </tr>
-        ))}
+        {data?.items?.map((s: any) => {
+          const j = jobs[s.id];
+          const status = j?.status || s.status;
+          const badge = (st:string) => {
+            const color = st==='failed'?'#fff0f0': st==='completed'?'#f0fff0': st==='running'?'#fffbe6':'#f0f0f0';
+            return (<span style={{ background: color, padding: '2px 6px', borderRadius: 4 }}>{st}</span>);
+          };
+          const perfScore = j?.performance?.performance_score;
+          const zap = j?.security?.counts;
+          const perfUrl = j?.artifact_urls?.perf_html?.presigned_url;
+          const zapUrl = j?.artifact_urls?.zap_html?.presigned_url;
+          return (
+            <tr key={s.id}>
+              <td><a href={`/sessions/${s.id}`}>{s.id.slice(0,8)}…</a></td>
+              <td>{s.project || ''}</td>
+              <td>{s.kind}</td>
+              <td>{s.test_type}</td>
+              <td>{badge(status)}</td>
+              <td>{typeof perfScore==='number'? perfScore: ''}</td>
+              <td>{zap? `H${zap.High||0}/M${zap.Medium||0}/L${zap.Low||0}`: ''}</td>
+              <td>
+                {perfUrl && <a href={perfUrl} target="_blank" rel="noreferrer">Perf</a>} {zapUrl && <a href={zapUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>ZAP</a>}
+              </td>
+              <td>{new Date(s.created_at).toLocaleString()}</td>
+              <td><button onClick={()=>rerun(s.id)} disabled={!j?.payload}>Re-run</button></td>
+            </tr>
+          );
+        })}
         </tbody>
       </table>
 
