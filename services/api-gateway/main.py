@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Optional, Literal, List
 
-from fastapi import FastAPI, Depends, Header, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Depends, Header, HTTPException, status, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
 from rq import Queue
@@ -190,6 +190,43 @@ def get_job(job_id: str, _: bool = Depends(verify_api_key)):
 def healthz():
     try:
         _ = _redis_conn().ping()
-        return {"ok": True}
+        # Try a lightweight DB query
+        try:
+            dbmod.ensure_schema()
+            db_ok = True
+        except Exception:
+            db_ok = False
+        return {"ok": True, "db": db_ok}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# -------- Sessions API (for dashboard) --------
+
+@app.get("/api/sessions")
+def list_sessions(
+    _: bool = Depends(verify_api_key),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    project: Optional[str] = None,
+    kind: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    try:
+        rows = dbmod.list_sessions(limit=limit, offset=offset, project=project, kind=kind, status=status)
+        return {"items": rows, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: str, _: bool = Depends(verify_api_key)):
+    sess = dbmod.get_session(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    res = None
+    try:
+        res = dbmod.latest_result(session_id)
+    except Exception:
+        res = None
+    return {"session": sess, "latest_result": res}

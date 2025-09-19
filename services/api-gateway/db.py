@@ -1,6 +1,6 @@
 import os
 import psycopg2
-from psycopg2.extras import Json
+from psycopg2.extras import Json, RealDictCursor
 
 
 def get_conn():
@@ -47,4 +47,41 @@ def insert_session(session_id: str, kind: str, test_type: str, project: str | No
                 (session_id, project, kind, test_type, status),
             )
         conn.commit()
+
+
+def list_sessions(limit: int = 50, offset: int = 0, project: str | None = None, kind: str | None = None, status: str | None = None):
+    q = "select id, project, kind, test_type, status, created_at, updated_at from test_sessions"
+    where = []
+    args = []
+    if project:
+        where.append("project = %s"); args.append(project)
+    if kind:
+        where.append("kind = %s"); args.append(kind)
+    if status:
+        where.append("status = %s"); args.append(status)
+    if where:
+        q += " where " + " and ".join(where)
+    q += " order by created_at desc limit %s offset %s"
+    args.extend([limit, offset])
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(q, args)
+            rows = cur.fetchall() or []
+            return [dict(r) for r in rows]
+
+
+def get_session(session_id: str):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("select id, project, kind, test_type, status, created_at, updated_at from test_sessions where id=%s", (session_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def latest_result(session_id: str):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("select id, created_at, summary from test_results where session_id=%s order by created_at desc limit 1", (session_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
 

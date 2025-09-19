@@ -1,0 +1,23 @@
+{
+  "url": "https://store.ratemate.top/login",
+  "test_type": "performance",
+  "passed": true,
+  "status_code": 200,
+  "title": "Login",
+  "screenshot": "/workspace/test-results/taas/7dafa51ca035459dbd016463577ae78c-1-screenshot.png",
+  "trace": "/workspace/test-results/taas/7dafa51ca035459dbd016463577ae78c-1-trace.zip",
+  "duration_sec": 4.18,
+  "metrics": null,
+  "alerts": [],
+  "error": null,
+  "performance": {
+    "error": "lighthouse_failed:HTTPConnectionPool(host='perf', port=3001): Max retries exceeded with url: /run (Caused by NameResolutionError(\"<urllib3.connection.HTTPConnection object at 0x7f2359d82b90>: Failed to resolve 'perf' ([Errno -2] Name or service not known)\"))"
+  },
+  "security": null,
+  "policy": {
+    "performance_ok": false,
+    "performance_reasons": null,
+    "security_ok": true,
+    "security_reasons": null
+  }
+}

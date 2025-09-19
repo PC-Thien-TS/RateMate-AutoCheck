@@ -27,6 +27,7 @@ services:
       - redis
       - perf
       - zap
+      - postgres
 
   worker:
     build:
@@ -34,15 +35,24 @@ services:
     environment:
       - TAAS_RESULTS_DIR=/workspace/test-results/taas
       - RQ_REDIS_URL=redis://redis:6379/0
-      # Optionally configure MobSF
-      # - MOBSF_URL=http://host.docker.internal:8000
-      # - MOBSF_API_KEY=xxxx
-      # Performance thresholds (optional)
+      # Postgres
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=taas
+      - PGPASSWORD=taas
+      - PGDATABASE=taas
+      # MinIO/S3
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=taas-artifacts
+      - S3_REGION=us-east-1
+      - ARTIFACT_TTL_SECONDS=86400
+      # Thresholds (optional)
       # - PERF_SCORE_MIN=80
       # - PERF_LCP_MAX_MS=2500
       # - PERF_CLS_MAX=0.1
       # - PERF_TTI_MAX_MS=5000
-      # Security thresholds (optional)
       # - ZAP_ALLOW_MEDIUM=0
       # - ZAP_ALLOW_HIGH=0
     volumes:
@@ -52,6 +62,8 @@ services:
       - redis
       - perf
       - zap
+      - postgres
+      - minio
 
   perf:
     build:
@@ -94,18 +106,6 @@ services:
       - minio:/data
 
 volumes:
-  pgdata:
-  minio:
-      # Postgres
-      - PGHOST=postgres
-      - PGPORT=5432
-      - PGUSER=taas
-      - PGPASSWORD=taas
-      - PGDATABASE=taas
-      # MinIO/S3 (local examples)
-      - S3_ENDPOINT=http://minio:9000
-      - S3_ACCESS_KEY=minioadmin
-      - S3_SECRET_KEY=minioadmin
-      - S3_BUCKET=taas-artifacts
-      - S3_REGION=us-east-1
-      - ARTIFACT_TTL_SECONDS=86400
+  pgdata: {}
+  minio: {}
+
