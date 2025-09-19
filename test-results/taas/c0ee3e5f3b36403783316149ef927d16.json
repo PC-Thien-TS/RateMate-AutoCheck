@@ -1,0 +1,12 @@
+{
+  "job_id": "c0ee3e5f3b36403783316149ef927d16",
+  "status": "failed",
+  "kind": "web",
+  "payload": {
+    "url": "https://store.ratemate.top/login",
+    "test_type": "performance",
+    "site": null,
+    "routes": null
+  },
+  "result_path": "/workspace/test-results/taas/c0ee3e5f3b36403783316149ef927d16-result.json"
+}
