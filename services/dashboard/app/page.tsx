@@ -27,7 +27,10 @@ export default function Home() {
   const [project, setProject] = useState("");
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("");
-  const { data, loading, error } = useSessions({ limit, offset, project, kind, status });
+  const [testType, setTestType] = useState("");
+  const [since, setSince] = useState("");
+  const [until, setUntil] = useState("");
+  const { data, loading, error } = useSessions({ limit, offset, project, kind, status, test_type: testType, since, until });
 
   return (
     <div>
@@ -35,6 +38,9 @@ export default function Home() {
         <label>Project: <input value={project} onChange={e=>setProject(e.target.value)} /></label>
         <label style={{ marginLeft: 12 }}>Kind: <input placeholder="web/mobile" value={kind} onChange={e=>setKind(e.target.value)} /></label>
         <label style={{ marginLeft: 12 }}>Status: <input placeholder="completed/failed" value={status} onChange={e=>setStatus(e.target.value)} /></label>
+        <label style={{ marginLeft: 12 }}>Type: <input placeholder="smoke/performance/security/auto" value={testType} onChange={e=>setTestType(e.target.value)} /></label>
+        <label style={{ marginLeft: 12 }}>Since: <input type="datetime-local" value={since} onChange={e=>setSince(e.target.value)} /></label>
+        <label style={{ marginLeft: 12 }}>Until: <input type="datetime-local" value={until} onChange={e=>setUntil(e.target.value)} /></label>
         <label style={{ marginLeft: 12 }}>Limit: <input type="number" value={limit} onChange={e=>setLimit(parseInt(e.target.value||"20"))} style={{ width: 60 }} /></label>
         <button onClick={() => setOffset(0)} style={{ marginLeft: 12 }}>Apply</button>
       </section>
@@ -68,4 +74,3 @@ export default function Home() {
     </div>
   );
 }
-

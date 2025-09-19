@@ -463,7 +463,7 @@ def run_web_test(job_id: str, payload: Dict):
         final['artifact_urls'] = artifacts
     _update(job_id, final)
 
-    # Persist to Postgres if configured
+    # Persist to Postgres if configured (store summary + artifact URLs)
     try:
         dsn = {
             "host": os.getenv("PGHOST", "postgres"),
@@ -475,7 +475,10 @@ def run_web_test(job_id: str, payload: Dict):
         with psycopg2.connect(**dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute("update test_sessions set status=%s, updated_at=now() where id=%s", (final['status'], job_id))
-                cur.execute("insert into test_results(session_id, summary) values (%s,%s)", (job_id, Json(result)))
+                result_db = dict(result)
+                if artifacts:
+                    result_db['artifact_urls'] = artifacts
+                cur.execute("insert into test_results(session_id, summary) values (%s,%s)", (job_id, Json(result_db)))
             conn.commit()
     except Exception:
         pass

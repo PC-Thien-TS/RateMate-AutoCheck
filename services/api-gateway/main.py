@@ -213,9 +213,12 @@ def list_sessions(
     project: Optional[str] = None,
     kind: Optional[str] = None,
     status: Optional[str] = None,
+    test_type: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
 ):
     try:
-        rows = dbmod.list_sessions(limit=limit, offset=offset, project=project, kind=kind, status=status)
+        rows = dbmod.list_sessions(limit=limit, offset=offset, project=project, kind=kind, status=status, test_type=test_type, since=since, until=until)
         return {"items": rows, "limit": limit, "offset": offset}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -232,3 +235,20 @@ def get_session(session_id: str, _: bool = Depends(verify_api_key)):
     except Exception:
         res = None
     return {"session": sess, "latest_result": res}
+
+
+@app.get("/api/sessions/{session_id}/results")
+def list_session_results(session_id: str, _: bool = Depends(verify_api_key), limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    try:
+        rows = dbmod.list_results(session_id, limit=limit, offset=offset)
+        return {"items": rows, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/results/{result_id}")
+def get_result(result_id: int, _: bool = Depends(verify_api_key)):
+    row = dbmod.get_result(result_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    return row

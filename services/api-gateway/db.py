@@ -49,7 +49,7 @@ def insert_session(session_id: str, kind: str, test_type: str, project: str | No
         conn.commit()
 
 
-def list_sessions(limit: int = 50, offset: int = 0, project: str | None = None, kind: str | None = None, status: str | None = None):
+def list_sessions(limit: int = 50, offset: int = 0, project: str | None = None, kind: str | None = None, status: str | None = None, test_type: str | None = None, since: str | None = None, until: str | None = None):
     q = "select id, project, kind, test_type, status, created_at, updated_at from test_sessions"
     where = []
     args = []
@@ -59,6 +59,12 @@ def list_sessions(limit: int = 50, offset: int = 0, project: str | None = None, 
         where.append("kind = %s"); args.append(kind)
     if status:
         where.append("status = %s"); args.append(status)
+    if test_type:
+        where.append("test_type = %s"); args.append(test_type)
+    if since:
+        where.append("created_at >= %s"); args.append(since)
+    if until:
+        where.append("created_at <= %s"); args.append(until)
     if where:
         q += " where " + " and ".join(where)
     q += " order by created_at desc limit %s offset %s"
@@ -85,3 +91,21 @@ def latest_result(session_id: str):
             row = cur.fetchone()
             return dict(row) if row else None
 
+
+def list_results(session_id: str, limit: int = 50, offset: int = 0):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "select id, session_id, created_at, summary from test_results where session_id=%s order by created_at desc limit %s offset %s",
+                (session_id, limit, offset)
+            )
+            rows = cur.fetchall() or []
+            return [dict(r) for r in rows]
+
+
+def get_result(result_id: int):
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("select id, session_id, created_at, summary from test_results where id=%s", (result_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
