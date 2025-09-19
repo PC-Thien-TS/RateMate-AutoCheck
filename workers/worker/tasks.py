@@ -10,6 +10,10 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, urlunparse
 from zapv2 import ZAPv2
+import boto3
+from botocore.client import Config
+import psycopg2
+from psycopg2.extras import Json
 
 
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
@@ -312,10 +316,23 @@ def run_web_test(job_id: str, payload: Dict):
                 if status >= 100:
                     break
                 time.sleep(1)
+            # Ajax spider for SPA
+            try:
+                zap.ajaxSpider.scan(target)
+                t0_ajax = time.time()
+                while True:
+                    st = zap.ajaxSpider.status()
+                    if st == 'stopped' or (time.time() - t0_ajax) > 60:
+                        break
+                    time.sleep(1)
+            except Exception:
+                pass
             # Passive scanning usually runs automatically, give it a moment
             time.sleep(2)
             # Fetch alerts
             alerts = zap.core.alerts(baseurl=target) or []
+            # Exclude noisy static chunks
+            alerts = [a for a in alerts if '/_next/static/' not in (a.get('url') or '')]
             # Summarize by risk
             counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
             items = []
@@ -353,6 +370,44 @@ def run_web_test(job_id: str, payload: Dict):
             zap_result = {"error": str(e)}
             zap_ok = False
 
+    # Upload artifacts to S3/MinIO if configured
+    s3cfg = {
+        'endpoint_url': os.getenv('S3_ENDPOINT'),
+        'access_key': os.getenv('S3_ACCESS_KEY'),
+        'secret_key': os.getenv('S3_SECRET_KEY'),
+        'bucket': os.getenv('S3_BUCKET', 'taas-artifacts'),
+        'region': os.getenv('S3_REGION', 'us-east-1'),
+    }
+    def _s3() -> boto3.client:
+        return boto3.client(
+            's3',
+            endpoint_url=s3cfg['endpoint_url'],
+            aws_access_key_id=s3cfg['access_key'],
+            aws_secret_access_key=s3cfg['secret_key'],
+            region_name=s3cfg['region'],
+            config=Config(signature_version='s3v4'),
+        ) if s3cfg['endpoint_url'] and s3cfg['access_key'] and s3cfg['secret_key'] else None
+
+    def _ensure_bucket(cli):
+        try:
+            cli.head_bucket(Bucket=s3cfg['bucket'])
+        except Exception:
+            try:
+                cli.create_bucket(Bucket=s3cfg['bucket'])
+            except Exception:
+                pass
+
+    def _upload(path: Path) -> dict | None:
+        cli = _s3()
+        if not cli or not path or not path.is_file():
+            return None
+        _ensure_bucket(cli)
+        key = f"{job_id}/{path.name}"
+        cli.upload_file(str(path), s3cfg['bucket'], key)
+        ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
+        url = cli.generate_presigned_url('get_object', Params={'Bucket': s3cfg['bucket'], 'Key': key}, ExpiresIn=ttl)
+        return { 'bucket': s3cfg['bucket'], 'key': key, 'presigned_url': url }
+
     # For single URL keep backward-compatible shape
     if len(urls) == 1:
         r0 = case_results[0]
@@ -384,9 +439,46 @@ def run_web_test(job_id: str, payload: Dict):
         }
     out_path = RESULTS_DIR / f"{job_id}-result.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Upload artifacts and add URLs
+    artifacts = {}
+    if len(urls) == 1:
+        if r0.get("screenshot"):
+            artifacts['screenshot'] = _upload(Path(r0['screenshot']))
+        if r0.get("trace"):
+            artifacts['trace'] = _upload(Path(r0['trace']))
+    else:
+        for idx, c in enumerate(case_results, start=1):
+            if c.get('screenshot'):
+                artifacts[f'screenshot_{idx}'] = _upload(Path(c['screenshot']))
+            if c.get('trace'):
+                artifacts[f'trace_{idx}'] = _upload(Path(c['trace']))
+    if perf_result and perf_result.get('report_path'):
+        artifacts['perf_html'] = _upload(Path(perf_result['report_path']))
+    if zap_result and zap_result.get('report_path'):
+        artifacts['zap_html'] = _upload(Path(zap_result['report_path']))
+
     final_pass = all_passed and (perf_ok if test_type == "performance" else True) and (zap_ok if test_type == "security" else True)
     final = {"status": "completed" if final_pass else "failed", "result_path": str(out_path)}
+    if artifacts:
+        final['artifact_urls'] = artifacts
     _update(job_id, final)
+
+    # Persist to Postgres if configured
+    try:
+        dsn = {
+            "host": os.getenv("PGHOST", "postgres"),
+            "port": int(os.getenv("PGPORT", "5432")),
+            "user": os.getenv("PGUSER", "taas"),
+            "password": os.getenv("PGPASSWORD", "taas"),
+            "dbname": os.getenv("PGDATABASE", "taas"),
+        }
+        with psycopg2.connect(**dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("update test_sessions set status=%s, updated_at=now() where id=%s", (final['status'], job_id))
+                cur.execute("insert into test_results(session_id, summary) values (%s,%s)", (job_id, Json(result)))
+            conn.commit()
+    except Exception:
+        pass
 
 
 def run_mobile_test(job_id: str, payload: Dict):

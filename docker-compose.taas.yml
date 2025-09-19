@@ -13,6 +13,12 @@ services:
       - API_KEY=${API_KEY:-dev-key}
       - TAAS_RESULTS_DIR=/workspace/test-results/taas
       - TAAS_UPLOAD_DIR=/workspace/test-results/taas/uploads
+      # Postgres
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=taas
+      - PGPASSWORD=taas
+      - PGDATABASE=taas
     volumes:
       - ./:/workspace
     ports:
@@ -63,3 +69,43 @@ services:
       - ZAP_API_KEY=${ZAP_API_KEY:-changeme}
     ports:
       - "8090:8090"
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=taas
+      - POSTGRES_USER=taas
+      - POSTGRES_PASSWORD=taas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio:/data
+
+volumes:
+  pgdata:
+  minio:
+      # Postgres
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=taas
+      - PGPASSWORD=taas
+      - PGDATABASE=taas
+      # MinIO/S3 (local examples)
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=taas-artifacts
+      - S3_REGION=us-east-1
+      - ARTIFACT_TTL_SECONDS=86400

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
 from rq import Queue
 from redis import Redis
+import db as dbmod
 
 
 # ---------- Config ----------
@@ -103,6 +104,14 @@ def root():
     }
 
 
+@app.on_event("startup")
+def _startup():
+    try:
+        dbmod.ensure_schema()
+    except Exception:
+        pass
+
+
 def _write_status(job_id: str, payload: dict, status: str, kind: str) -> Path:
     out = {
         "job_id": job_id,
@@ -121,6 +130,10 @@ def enqueue_web(req: WebTestRequest, _: bool = Depends(verify_api_key)):
     # Ensure JSON-serializable payload (e.g., AnyUrl -> str)
     payload = req.model_dump(mode="json")
     _write_status(job_id, payload, status="queued", kind="web")
+    try:
+        dbmod.insert_session(job_id, kind="web", test_type=req.test_type, project=req.site or None, status="queued")
+    except Exception:
+        pass
     q = get_queue()
     # Enqueue worker task name; worker container must import tasks.run_web_test
     q.enqueue("tasks.run_web_test", job_id, payload, job_id=job_id)
@@ -132,6 +145,10 @@ def enqueue_mobile(req: MobileTestRequest, _: bool = Depends(verify_api_key)):
     job_id = uuid.uuid4().hex
     payload = req.model_dump(mode="json")
     _write_status(job_id, payload, status="queued", kind="mobile")
+    try:
+        dbmod.insert_session(job_id, kind="mobile", test_type=req.test_type, project=req.project or None, status="queued")
+    except Exception:
+        pass
     q = get_queue()
     q.enqueue("tasks.run_mobile_test", job_id, payload, job_id=job_id)
     return JobEnqueueResponse(job_id=job_id, status="queued")
