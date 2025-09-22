@@ -1,0 +1,14 @@
+{
+  "job_id": "4932cb9dd43e47698d50a58dc6aab448",
+  "status": "cancel_requested",
+  "kind": "web",
+  "payload": {
+    "url": "https://store.ratemate.top/login",
+    "test_type": "smoke",
+    "site": "ratemate",
+    "routes": [
+      "/login"
+    ],
+    "project": "ratemate"
+  }
+}

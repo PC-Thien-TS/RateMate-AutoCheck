@@ -1,0 +1,15 @@
+{
+  "job_id": "91f9afe9c8e54eca83de8e37eabbb3fc",
+  "status": "queued",
+  "kind": "mobile",
+  "payload": {
+    "apk_url": null,
+    "ipa_url": null,
+    "apk_path": "/workspace/test-results/taas/uploads/255f183941c9431bbf212fe32bec6969.apk",
+    "ipa_path": null,
+    "deep_link": null,
+    "test_type": "analyze",
+    "device": null,
+    "project": "ratemate"
+  }
+}

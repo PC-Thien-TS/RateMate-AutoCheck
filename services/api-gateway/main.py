@@ -9,6 +9,9 @@ from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, AnyUrl
 from fastapi.responses import RedirectResponse
+import boto3
+from botocore.client import Config
+import urllib.parse
 from rq import Queue
 from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
 from redis import Redis
@@ -25,6 +28,13 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 QUEUE_NAME = os.getenv("TAAS_QUEUE_NAME", "taas")
 API_KEY = os.getenv("API_KEY", "dev-key")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+# S3/MinIO config (for baseline acceptance)
+S3_ENDPOINT = os.getenv("S3_ENDPOINT")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
+S3_BUCKET = os.getenv("S3_BUCKET", "taas-artifacts")
+S3_REGION = os.getenv("S3_REGION", "us-east-1")
 
 
 def _redis_conn() -> Redis:
@@ -283,6 +293,89 @@ def retry_job(job_id: str, _: bool = Depends(verify_api_key)):
     target = "tasks.run_mobile_test" if kind == "mobile" else "tasks.run_web_test"
     q.enqueue(target, new_id, payload, job_id=new_id)
     return JobEnqueueResponse(job_id=new_id, status="queued")
+
+
+@app.get("/api/job-results/{job_id}")
+def get_job_results(job_id: str, _: bool = Depends(verify_api_key)):
+    rp = RESULTS_DIR / f"{job_id}-result.json"
+    if not rp.is_file():
+        raise HTTPException(status_code=404, detail="Result not found")
+    try:
+        data = json.loads(rp.read_text(encoding="utf-8"))
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _s3_client():
+    if not (S3_ENDPOINT and S3_ACCESS_KEY and S3_SECRET_KEY):
+        raise HTTPException(status_code=500, detail="S3 not configured")
+    return boto3.client(
+        's3',
+        endpoint_url=S3_ENDPOINT,
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+        region_name=S3_REGION,
+        config=Config(signature_version='s3v4'),
+    )
+
+
+def _slug_from_url(u: str) -> str:
+    try:
+        p = urllib.parse.urlparse(u)
+        path = p.path or "/"
+        s = path.replace("/", "_")
+        s = s.strip("_") or "root"
+        return s
+    except Exception:
+        return "route"
+
+
+@app.post("/api/visual/accept")
+def visual_accept(data: dict, _: bool = Depends(verify_api_key)):
+    job_id = str(data.get("job_id") or "").strip()
+    index = int(data.get("index") or 1)
+    project = (str(data.get("project") or "").strip()) or None
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+
+    # Load job result to get URL + project if needed
+    res = get_job_results(job_id, True)
+    test_type = (res.get("test_type") or "").lower()
+    cases = res.get("cases") if isinstance(res.get("cases"), list) else None
+    if cases:
+        try:
+            url = cases[index-1].get("url")
+        except Exception:
+            url = None
+    else:
+        url = res.get("url")
+    if not project:
+        # from payload in status JSON
+        st = json.loads((RESULTS_DIR / f"{job_id}.json").read_text(encoding="utf-8"))
+        pl = st.get("payload", {}) if isinstance(st, dict) else {}
+        project = pl.get("project") or pl.get("site") or "default"
+
+    # Determine screenshot path
+    sp = RESULTS_DIR / f"{job_id}-{index}-screenshot.png"
+    if not sp.is_file():
+        # fallback single screenshot name
+        sp = RESULTS_DIR / f"{job_id}-screenshot.png"
+    if not sp.is_file():
+        raise HTTPException(status_code=404, detail="screenshot not found")
+
+    # Compute baseline key and upload
+    slug = _slug_from_url(url or f"case-{index}")
+    dim = "1366x900"
+    key = f"baselines/{project}/{slug}_{dim}.png"
+    cli = _s3_client()
+    try:
+        cli.upload_file(str(sp), S3_BUCKET, key)
+        ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
+        url_signed = cli.generate_presigned_url('get_object', Params={'Bucket': S3_BUCKET, 'Key': key}, ExpiresIn=ttl)
+        return {"ok": True, "baseline_key": key, "url": url_signed}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/artifacts/{job_id}/{name}")

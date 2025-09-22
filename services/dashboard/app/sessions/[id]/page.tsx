@@ -24,6 +24,7 @@ export default function Page({ params }: { params: { id: string } }) {
   const id = params.id;
   const [sess, setSess] = useState<any>(null);
   const [job, setJob] = useState<any>(null);
+  const [resultDetail, setResultDetail] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,6 +37,10 @@ export default function Page({ params }: { params: { id: string } }) {
           fetch(`${API}/api/jobs/${id}`, { headers: { 'x-api-key': API_KEY }}).then(r=>r.json()),
         ]);
         setSess(s); setJob(j);
+        try {
+          const rd = await fetch(`${API}/api/job-results/${id}`, { headers: { 'x-api-key': API_KEY }});
+          if (rd.ok) setResultDetail(await rd.json());
+        } catch {}
         const st = j?.status;
         if (st === 'queued' || st === 'running') {
           timer = setTimeout(load, 2000);
@@ -57,6 +62,33 @@ export default function Page({ params }: { params: { id: string } }) {
   const perfScore = latestSummary?.performance?.performance_score;
   const zapCounts = latestSummary?.security?.counts;
   const mob = latestSummary && (latestSummary.risk_score || latestSummary.permissions || latestSummary.endpoints) ? latestSummary : null;
+
+  const VisualBlock = () => {
+    if (!resultDetail || !Array.isArray(resultDetail.cases)) return null;
+    return (
+      <div>
+        <h3>Visual Regression</h3>
+        {resultDetail.cases.map((c:any, i:number) => (
+          <div key={i} style={{ marginBottom:10, border:'1px solid #333', padding:8 }}>
+            <div style={{ fontSize:12, marginBottom:4 }}>{c.url}</div>
+            {c.visual && (
+              <div>
+                <span>Mismatch: {typeof c.visual.mismatch_pct==='number'? `${c.visual.mismatch_pct}%` : (c.visual.baseline_missing? 'baseline missing' : 'n/a')} </span>
+                <span>{c.visual.passed? '(passed)' : '(failed)'}</span>
+              </div>
+            )}
+            <button onClick={async()=>{
+              try {
+                const res = await fetch(`${API}/api/visual/accept`, { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': API_KEY }, body: JSON.stringify({ job_id: id, index: i+1 }) });
+                if (!res.ok) throw new Error(await res.text());
+                alert('Baseline accepted');
+              } catch(e:any){ alert(e?.message||String(e)); }
+            }}>Accept Baseline</button>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const rerun = async () => {
     try {
@@ -148,6 +180,8 @@ export default function Page({ params }: { params: { id: string } }) {
           </pre>
         </div>
       )}
+
+      <VisualBlock />
 
       {mob && (
         <div>

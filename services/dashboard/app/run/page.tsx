@@ -46,6 +46,12 @@ export default function RunPage() {
   return (
     <div>
       <h2>Run Web Test</h2>
+      <div style={{ marginBottom: 8 }}>
+        Quick type:
+        {['smoke','auto','performance','security'].map(t => (
+          <button key={t} onClick={()=>setTestType(t)} style={{ marginLeft: 6, background: testType===t? '#e6f7ff':'', borderRadius:4 }}>{t}</button>
+        ))}
+      </div>
       <form onSubmit={submit}>
         <div style={{ marginBottom: 8 }}>
           <label>Test Type: </label>

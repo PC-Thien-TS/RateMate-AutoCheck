@@ -253,6 +253,60 @@ def run_web_test(job_id: str, payload: Dict):
                         passed = passed and (len(missing) == 0)
                 except Exception:
                     pass
+                # Visual regression vs baseline (S3)
+                visual = None
+                try:
+                    project = payload.get('project') or payload.get('site') or 'default'
+                    slug = (urlparse(target).path or '/').replace('/', '_').strip('_') or 'root'
+                    dim = '1366x900'
+                    baseline_key = f"baselines/{project}/{slug}_{dim}.png"
+                    # Download baseline if exists
+                    base_tmp = RESULTS_DIR / f"{job_id}-{idx+1}-baseline.png"
+                    has_baseline = _download_baseline(baseline_key, base_tmp)
+                    mismatch = None
+                    diff_path = RESULTS_DIR / f"{job_id}-{idx+1}-visual-diff.png"
+                    passed_visual = True
+                    auto_base = os.getenv('VISUAL_AUTO_BASELINE','0') == '1'
+                    threshold = float(os.getenv('VISUAL_THRESHOLD_PCT', '0.1'))
+                    if has_baseline:
+                        try:
+                            from PIL import Image, ImageChops  # pillow
+                            a = Image.open(str(base_tmp)).convert('RGBA')
+                            b = Image.open(str(screenshot_path)).convert('RGBA')
+                            if a.size != b.size:
+                                b = b.resize(a.size)
+                            diff = ImageChops.difference(a, b)
+                            bbox = diff.getbbox()
+                            if bbox:
+                                # Compute mismatch percentage
+                                hist = diff.histogram()
+                                # alpha channel may exist; approximate by non-zero pixels
+                                nonzero = sum(hist[1:])
+                                total = sum(hist)
+                                mismatch = round((nonzero/total)*100, 3) if total else 0.0
+                                if mismatch is not None and mismatch > threshold:
+                                    passed_visual = False
+                                diff.save(str(diff_path))
+                                _upload(diff_path)
+                        except Exception:
+                            pass
+                    else:
+                        if auto_base:
+                            # set current as baseline
+                            cli = _s3()
+                            if cli:
+                                _ensure_bucket(cli)
+                                cli.upload_file(str(screenshot_path), s3cfg['bucket'], baseline_key)
+                    visual = {
+                        'baseline_key': baseline_key,
+                        'baseline_missing': not has_baseline,
+                        'mismatch_pct': mismatch,
+                        'passed': passed_visual,
+                        'diff_image': str(diff_path) if diff_path.exists() else None,
+                    }
+                except Exception:
+                    visual = None
+
                 context.tracing.stop(path=str(trace_path))
                 context.close(); browser.close()
             except Exception as e:
@@ -274,6 +328,7 @@ def run_web_test(job_id: str, payload: Dict):
                 "trace": str(trace_path) if trace_path.exists() else None,
                 "error": err,
                 "missing_selectors": missing or None,
+                "visual": visual,
             })
             if not passed:
                 all_passed = False
@@ -425,15 +480,20 @@ def run_web_test(job_id: str, payload: Dict):
         'bucket': os.getenv('S3_BUCKET', 'taas-artifacts'),
         'region': os.getenv('S3_REGION', 'us-east-1'),
     }
+
     def _s3() -> boto3.client:
-        return boto3.client(
-            's3',
-            endpoint_url=s3cfg['endpoint_url'],
-            aws_access_key_id=s3cfg['access_key'],
-            aws_secret_access_key=s3cfg['secret_key'],
-            region_name=s3cfg['region'],
-            config=Config(signature_version='s3v4'),
-        ) if s3cfg['endpoint_url'] and s3cfg['access_key'] and s3cfg['secret_key'] else None
+        return (
+            boto3.client(
+                's3',
+                endpoint_url=s3cfg['endpoint_url'],
+                aws_access_key_id=s3cfg['access_key'],
+                aws_secret_access_key=s3cfg['secret_key'],
+                region_name=s3cfg['region'],
+                config=Config(signature_version='s3v4'),
+            )
+            if s3cfg['endpoint_url'] and s3cfg['access_key'] and s3cfg['secret_key']
+            else None
+        )
 
     def _ensure_bucket(cli):
         try:
@@ -454,6 +514,17 @@ def run_web_test(job_id: str, payload: Dict):
         ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
         url = cli.generate_presigned_url('get_object', Params={'Bucket': s3cfg['bucket'], 'Key': key}, ExpiresIn=ttl)
         return { 'bucket': s3cfg['bucket'], 'key': key, 'presigned_url': url }
+
+    def _download_baseline(key: str, dest: Path) -> bool:
+        cli = _s3()
+        if not cli:
+            return False
+        try:
+            _ensure_bucket(cli)
+            cli.download_file(s3cfg['bucket'], key, str(dest))
+            return True
+        except Exception:
+            return False
 
     # For single URL keep backward-compatible shape
     if len(urls) == 1:

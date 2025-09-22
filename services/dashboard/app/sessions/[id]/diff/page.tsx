@@ -57,6 +57,18 @@ export default function DiffPage({ params, searchParams }: { params: { id: strin
     return <span style={{ background:bg, color, padding:'2px 6px', borderRadius:4, marginRight:6 }}>{text}</span>;
   };
 
+  const Delta = ({label, left, right, higherIsBetter}:{label:string, left:number|undefined, right:number|undefined, higherIsBetter:boolean}) => {
+    if (typeof left !== 'number' || typeof right !== 'number') return <div style={{ fontSize:12 }}>{label}: n/a</div>;
+    const raw = right - left;
+    const pct = left !== 0 ? (raw/left)*100 : 0;
+    const better = higherIsBetter ? raw>0 : raw<0; // improvement condition
+    const kind = better ? 'ok' : 'bad';
+    const sign = raw>0? '+':'';
+    return <div style={{ fontSize:12 }}>
+      {label}: <Badge text={`${sign}${raw.toFixed(2)} (${sign}${pct.toFixed(1)}%)`} kind={kind as any} />
+    </div>;
+  };
+
   return (
     <div>
       <a href={`/sessions/${id}/results`}>← Back</a>
@@ -97,6 +109,17 @@ export default function DiffPage({ params, searchParams }: { params: { id: strin
             </div>
           ); })()}
         </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <h3>Performance Delta</h3>
+        {(() => { const lm=perfMetrics(left), rm=perfMetrics(right); return (
+          <div>
+            <Delta label='Perf score' left={perf(left)} right={perf(right)} higherIsBetter={true} />
+            <Delta label='LCP(ms)' left={lm.lcp} right={rm.lcp} higherIsBetter={false} />
+            <Delta label='CLS' left={lm.cls} right={rm.cls} higherIsBetter={false} />
+            <Delta label='TTI(ms)' left={lm.tti} right={rm.tti} higherIsBetter={false} />
+          </div>
+        ); })()}
       </div>
       <div style={{ marginTop: 12 }}>
         <h3>Alerts Added</h3>

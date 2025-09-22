@@ -1,0 +1,14 @@
+{
+  "job_id": "d934e044bbed46cab449e071ee4fbcee",
+  "status": "queued",
+  "kind": "web",
+  "payload": {
+    "url": "https://store.ratemate.top/login",
+    "test_type": "smoke",
+    "site": "ratemate",
+    "routes": [
+      "/login"
+    ],
+    "project": "ratemate"
+  }
+}

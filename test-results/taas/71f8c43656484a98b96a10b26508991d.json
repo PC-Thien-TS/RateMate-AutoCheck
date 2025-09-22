@@ -1,0 +1,14 @@
+{
+  "job_id": "71f8c43656484a98b96a10b26508991d",
+  "status": "queued",
+  "kind": "web",
+  "payload": {
+    "url": null,
+    "test_type": "smoke",
+    "site": "ratemate",
+    "routes": [
+      "/login"
+    ],
+    "project": null
+  }
+}
