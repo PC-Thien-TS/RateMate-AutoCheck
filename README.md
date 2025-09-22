@@ -248,6 +248,28 @@ Tập hợp các script nhỏ hỗ trợ khám phá và báo cáo.
   python tools/discover_from_targets.py --file config/discover/targets.yml
   ```
 
+
+---
+
+## Windows PowerShell (UTF-8)
+
+- To avoid encoding issues when viewing README/output on Windows PowerShell:
+
+```
+chcp 65001
+$env:PYTHONIOENCODING = 'utf-8'
+```
+
+## Pre-commit Hooks
+
+- Install and run format/lint hooks locally:
+
+```
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
 - **export\_coverage.py** – tổng hợp kết quả test và xuất báo cáo coverage.
 
   ```bash

@@ -11,7 +11,7 @@ export default function StatsBar() {
     let t: any;
     const load = async () => {
       try {
-        const r = await fetch(`${API}/api/stats`, { headers: { 'x-api-key': API_KEY } });
+        const r = await fetch(`${API}/api/stats?api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } });
         if (r.ok) setS(await r.json());
       } catch (_) {}
       t = setTimeout(load, 5000);
@@ -32,4 +32,3 @@ export default function StatsBar() {
     </div>
   );
 }
-

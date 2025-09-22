@@ -53,15 +53,65 @@ export default function Page({ params }: { params: { id: string } }) {
     return () => { if (timer) clearTimeout(timer); };
   }, [id]);
 
-  const art = job?.artifact_urls || {};
-  const screenshotUrl = rewriteUrl(art.screenshot?.presigned_url || art.screenshot_1?.presigned_url);
+  // Latest summary from DB
+  const latestSummary = sess?.latest_result?.summary || {};
+  // Prefer API proxy that re-signs URLs to avoid host/signature mismatch
+  const art = (job?.artifact_urls || latestSummary?.artifact_urls || {}) as any;
+  const screenshotUrl = `${API}/api/artifacts/${id}/screenshot_1?api_key=${encodeURIComponent(API_KEY)}`;
   const perfUrl = rewriteUrl(art.perf_html?.presigned_url);
   const zapUrl = rewriteUrl(art.zap_html?.presigned_url);
   const mobsfUrl = rewriteUrl(art.mobsf_html?.presigned_url);
-  const latestSummary = sess?.latest_result?.summary || {};
   const perfScore = latestSummary?.performance?.performance_score;
   const zapCounts = latestSummary?.security?.counts;
   const mob = latestSummary && (latestSummary.risk_score || latestSummary.permissions || latestSummary.endpoints) ? latestSummary : null;
+
+  const CaseTable = () => {
+    if (!resultDetail || !Array.isArray(resultDetail.cases)) return null;
+    const cases: any[] = resultDetail.cases;
+    const getArt = (name: string) => `${API}/api/artifacts/${id}/${name}?api_key=${encodeURIComponent(API_KEY)}`;
+    return (
+      <div>
+        <h3>Cases</h3>
+        <table cellPadding={6} border={1} style={{ borderCollapse:'collapse', width:'100%' }}>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>URL</th>
+              <th>Status</th>
+              <th>HTTP</th>
+              <th>Title</th>
+              <th>Missing selectors</th>
+              <th>Artifacts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cases.map((c, i) => {
+              const ok = !!c.passed;
+              const sKey = `screenshot_${i+1}`;
+              const tKey = `trace_${i+1}`;
+              const sUrl = getArt(sKey);
+              const tUrl = getArt(tKey);
+              return (
+                <tr key={i} style={{ background: ok ? '#102a12' : '#2a1010' }}>
+                  <td>{i+1}</td>
+                  <td style={{ maxWidth: 420, wordBreak:'break-all' }}>{c.url}</td>
+                  <td style={{ color: ok ? '#4caf50' : '#ff6b6b' }}>{ok? 'passed':'failed'}</td>
+                  <td>{c.status_code ?? ''}</td>
+                  <td>{c.title ?? ''}</td>
+                  <td style={{ color:'#ffd166' }}>{Array.isArray(c.missing_selectors)? c.missing_selectors.join(', ') : (c.missing_selectors || '')}</td>
+                  <td>
+                    <a href={sUrl} target="_blank" rel="noreferrer">screenshot</a>
+                    {" | "}
+                    <a href={tUrl} target="_blank" rel="noreferrer">trace</a>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   const VisualBlock = () => {
     if (!resultDetail || !Array.isArray(resultDetail.cases)) return null;
@@ -132,6 +182,20 @@ export default function Page({ params }: { params: { id: string } }) {
         <button onClick={retry} style={{ marginLeft: 8 }}>Retry</button>
         <button onClick={cancel} style={{ marginLeft: 8 }}>Cancel</button>
         <a href={`/sessions/${id}/results`} style={{ marginLeft: 8 }}>Results History</a>
+        <button style={{ marginLeft: 8 }} onClick={()=>{
+          try {
+            const urls: string[] = [];
+            const a: any = art || {};
+            Object.keys(a).filter(k=>k.startsWith('screenshot_')).forEach(k=>{
+              const u = rewriteUrl(a[k]?.presigned_url);
+              if (u) urls.push(u);
+            });
+            if (urls.length === 0 && Array.isArray(resultDetail?.cases)) {
+              if (screenshotUrl) urls.push(screenshotUrl);
+            }
+            urls.forEach(u=> window.open(u, '_blank'));
+          } catch {}
+        }}>Open all screenshots</button>
       </div>
 
       <h3>Summary</h3>
@@ -143,6 +207,8 @@ export default function Page({ params }: { params: { id: string } }) {
       <pre style={{ whiteSpace: 'pre-wrap', background: '#111', color: '#ddd', padding: 10 }}>
         {JSON.stringify(job, null, 2)}
       </pre>
+
+      <CaseTable />
 
       {screenshotUrl && (
         <div>

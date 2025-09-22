@@ -98,12 +98,7 @@ jobs:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-ms-playwright-1.55.0
-          restore-keys: ${{ runner.os }}-ms-playwright-
+      # (deduplicated) Single Playwright cache step is enough
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:

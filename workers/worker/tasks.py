@@ -475,6 +475,7 @@ def run_web_test(job_id: str, payload: Dict):
     # Upload artifacts to S3/MinIO if configured
     s3cfg = {
         'endpoint_url': os.getenv('S3_ENDPOINT'),
+        'public_endpoint': os.getenv('S3_PUBLIC_ENDPOINT') or os.getenv('S3_ENDPOINT'),
         'access_key': os.getenv('S3_ACCESS_KEY'),
         'secret_key': os.getenv('S3_SECRET_KEY'),
         'bucket': os.getenv('S3_BUCKET', 'taas-artifacts'),
@@ -495,6 +496,20 @@ def run_web_test(job_id: str, payload: Dict):
             else None
         )
 
+    def _s3_pub() -> boto3.client:
+        # Used only to generate presigned URLs with a public-facing host.
+        pe = s3cfg['public_endpoint'] or s3cfg['endpoint_url']
+        if not (pe and s3cfg['access_key'] and s3cfg['secret_key']):
+            return None
+        return boto3.client(
+            's3',
+            endpoint_url=pe,
+            aws_access_key_id=s3cfg['access_key'],
+            aws_secret_access_key=s3cfg['secret_key'],
+            region_name=s3cfg['region'],
+            config=Config(signature_version='s3v4'),
+        )
+
     def _ensure_bucket(cli):
         try:
             cli.head_bucket(Bucket=s3cfg['bucket'])
@@ -512,7 +527,8 @@ def run_web_test(job_id: str, payload: Dict):
         key = f"{job_id}/{path.name}"
         cli.upload_file(str(path), s3cfg['bucket'], key)
         ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
-        url = cli.generate_presigned_url('get_object', Params={'Bucket': s3cfg['bucket'], 'Key': key}, ExpiresIn=ttl)
+        pres = _s3_pub() or cli
+        url = pres.generate_presigned_url('get_object', Params={'Bucket': s3cfg['bucket'], 'Key': key}, ExpiresIn=ttl)
         return { 'bucket': s3cfg['bucket'], 'key': key, 'presigned_url': url }
 
     def _download_baseline(key: str, dest: Path) -> bool:

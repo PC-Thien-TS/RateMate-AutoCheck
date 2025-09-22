@@ -1,0 +1,37 @@
+{
+  "test_type": "smoke",
+  "passed": true,
+  "cases": [
+    {
+      "url": "https://store.ratemate.top/login",
+      "passed": true,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/117acd39103349b6b5f49ad8b8284e1a-1-screenshot.png",
+      "trace": "/workspace/test-results/taas/117acd39103349b6b5f49ad8b8284e1a-1-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    },
+    {
+      "url": "https://store.ratemate.top/en/store",
+      "passed": true,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/117acd39103349b6b5f49ad8b8284e1a-2-screenshot.png",
+      "trace": "/workspace/test-results/taas/117acd39103349b6b5f49ad8b8284e1a-2-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    }
+  ],
+  "duration_sec": 6.72,
+  "performance": null,
+  "security": null,
+  "policy": {
+    "performance_ok": true,
+    "performance_reasons": null,
+    "security_ok": true,
+    "security_reasons": null
+  }
+}

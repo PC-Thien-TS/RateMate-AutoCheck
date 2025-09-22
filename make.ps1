@@ -48,7 +48,7 @@ function Roles {
 
 function WriteTests {
   if (-not $SITE) { Write-Host "Usage: .\make.ps1 write -SITE <site> [-AllowWrite]"; return }
-  $allow = if ($AllowWrite) { "1" } else { "1" }
+  $allow = if ($AllowWrite) { "1" } else { "0" }
   docker run --rm -t --ipc=host --shm-size=1g `
     -v "${PWD}:/app" --env-file .env ratemate-tests bash -lc `
     "SITE=$SITE E2E_ALLOW_WRITE=$allow pytest -vv -m write tests --browser=chromium --screenshot=only-on-failure --tracing=retain-on-failure"

@@ -46,6 +46,11 @@ export default function RunPage() {
   return (
     <div>
       <h2>Run Web Test</h2>
+      <div style={{ margin:'8px 0', padding:8, border:'1px solid #333' }}>
+        <strong>Presets:</strong>
+        <button onClick={()=>{ setTestType('smoke'); setProject('ratemate'); setSite('ratemate'); setUrl('https://store.ratemate.top'); setRoutes('/login,/en/store'); }} style={{ marginLeft:6 }}>Ratemate Smoke</button>
+        <button onClick={()=>{ setTestType('auto'); setProject('ratemate'); setSite('ratemate'); setUrl('https://store.ratemate.top'); setRoutes(''); }} style={{ marginLeft:6 }}>Ratemate Auto</button>
+      </div>
       <div style={{ marginBottom: 8 }}>
         Quick type:
         {['smoke','auto','performance','security'].map(t => (
@@ -76,10 +81,12 @@ export default function RunPage() {
         <div style={{ marginBottom: 8 }}>
           <label>Base URL (optional): </label>
           <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://example.com" size={40} />
+          <span style={{ marginLeft:6, fontSize:12, opacity:.8 }}>Nếu chọn Site, có thể để trống.</span>
         </div>
         <div style={{ marginBottom: 8 }}>
           <label>Routes (optional, comma-separated): </label>
           <input value={routes} onChange={e=>setRoutes(e.target.value)} placeholder="/en/login,/en/store" size={40} />
+          <span style={{ marginLeft:6, fontSize:12, opacity:.8 }}>Để trống để dùng routes mặc định của Site.</span>
         </div>
         <button type="submit" disabled={loading}>{loading ? 'Submitting…' : 'Run'}</button>
       </form>

@@ -12,8 +12,8 @@ function useSessions(params: Record<string, string | number>) {
   const query = useMemo(() => new URLSearchParams(params as any).toString(), [params]);
   useEffect(() => {
     setLoading(true); setError(null);
-    fetch(`${API}/api/sessions?${query}`, { headers: { 'x-api-key': API_KEY } })
-      .then(r => r.json())
+    fetch(`${API}/api/sessions?${query}&api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } })
+      .then(async r => { if (!r.ok) throw new Error(await r.text().catch(()=>r.statusText)); return r.json(); })
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
@@ -36,8 +36,8 @@ export default function Home() {
   const [projects, setProjects] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`${API}/api/projects`, { headers: { 'x-api-key': API_KEY } })
-      .then(r=>r.json()).then(js=> setProjects(js.items||[])).catch(()=>{});
+    fetch(`${API}/api/projects?api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } })
+      .then(r=>r.json()).then(js=> setProjects(js.items||[])).catch((e)=>{ console.warn('projects error', e) });
   }, []);
 
   // Enrich with job status for perf/security/links; poll if any pending
@@ -48,7 +48,7 @@ export default function Home() {
       const ids: string[] = data.items.map((s: any) => s.id);
       try {
         const entries = await Promise.all(ids.map(async (id) => {
-          const res = await fetch(`${API}/api/jobs/${id}`, { headers: { 'x-api-key': API_KEY } });
+          const res = await fetch(`${API}/api/jobs/${id}?api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } });
           if (!res.ok) return [id, null] as const;
           const j = await res.json();
           return [id, j] as const;

@@ -28,9 +28,20 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 QUEUE_NAME = os.getenv("TAAS_QUEUE_NAME", "taas")
 API_KEY = os.getenv("API_KEY", "dev-key")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+_CORS_RAW = os.getenv("TAAS_CORS_ORIGINS") or os.getenv("CORS_ALLOW_ORIGINS") or "*"
+
+def _parse_origins(raw: str) -> list[str]:
+    try:
+        parts = [p.strip() for p in str(raw).split(",") if str(p).strip()]
+        if not parts or "*" in parts:
+            return ["*"]
+        return parts
+    except Exception:
+        return ["*"]
 
 # S3/MinIO config (for baseline acceptance)
 S3_ENDPOINT = os.getenv("S3_ENDPOINT")
+S3_PUBLIC_ENDPOINT = os.getenv("S3_PUBLIC_ENDPOINT") or S3_ENDPOINT
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "taas-artifacts")
@@ -45,13 +56,17 @@ def get_queue() -> Queue:
     return Queue(QUEUE_NAME, connection=_redis_conn())
 
 
-def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
+def verify_api_key(
+    x_api_key: Optional[str] = Header(default=None),
+    api_key_query: Optional[str] = Query(default=None, alias="api_key"),
+):
     # Accept either legacy global API_KEY or DB-backed api_keys
-    if API_KEY and x_api_key == API_KEY:
+    provided = x_api_key or api_key_query
+    if API_KEY and provided == API_KEY:
         return True
     # DB verify + basic rate limit per key
     try:
-        rec = dbmod.verify_api_key(x_api_key or "")
+        rec = dbmod.verify_api_key(provided or "")
     except Exception:
         rec = None
     if not rec:
@@ -120,7 +135,7 @@ class JobStatusResponse(BaseModel):
 app = FastAPI(title="RateMate TaaS API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_parse_origins(_CORS_RAW),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -211,18 +226,52 @@ def upload_mobile(file: UploadFile = File(...), _: bool = Depends(verify_api_key
 
 @app.get("/api/jobs/{job_id}", response_model=JobStatusResponse)
 def get_job(job_id: str, _: bool = Depends(verify_api_key)):
+    """Return job status from status file; fallback to DB + results if missing.
+
+    In some deployments, the ephemeral status file may be cleaned up or lost
+    after container restarts. This endpoint now gracefully falls back to
+    Postgres to provide a best-effort status and artifact URLs from the latest
+    result summary when the file is absent.
+    """
     path = RESULTS_DIR / f"{job_id}.json"
-    if not path.is_file():
+    if path.is_file():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return JobStatusResponse(
+            job_id=str(data.get("job_id") or job_id),
+            status=str(data.get("status") or "unknown"),
+            kind=str(data.get("kind") or "unknown"),
+            result_path=str(data.get("result_path") or ""),
+            error=data.get("error"),
+            payload=data.get("payload") if isinstance(data.get("payload"), dict) else None,
+            artifact_urls=data.get("artifact_urls") if isinstance(data.get("artifact_urls"), dict) else None,
+        )
+
+    # Fallback: use DB info and any artifact URLs from latest result
+    try:
+        sess = dbmod.get_session(job_id)
+    except Exception:
+        sess = None
+    if not sess:
         raise HTTPException(status_code=404, detail="Job not found")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    # Try to locate result JSON and artifact URLs from DB summary
+    result_path = str((RESULTS_DIR / f"{job_id}-result.json"))
+    arts = None
+    try:
+        res = dbmod.latest_result(job_id)
+        if res and isinstance(res.get("summary"), dict):
+            sm = res["summary"]
+            if isinstance(sm.get("artifact_urls"), dict):
+                arts = sm["artifact_urls"]
+    except Exception:
+        pass
     return JobStatusResponse(
-        job_id=str(data.get("job_id") or job_id),
-        status=str(data.get("status") or "unknown"),
-        kind=str(data.get("kind") or "unknown"),
-        result_path=str(data.get("result_path") or ""),
-        error=data.get("error"),
-        payload=data.get("payload") if isinstance(data.get("payload"), dict) else None,
-        artifact_urls=data.get("artifact_urls") if isinstance(data.get("artifact_urls"), dict) else None,
+        job_id=job_id,
+        status=str(sess.get("status") or "unknown"),
+        kind=str(sess.get("kind") or "unknown"),
+        result_path=result_path if (RESULTS_DIR / f"{job_id}-result.json").is_file() else "",
+        error=None,
+        payload=None,
+        artifact_urls=arts if isinstance(arts, dict) else None,
     )
 
 
@@ -230,15 +279,17 @@ def get_job(job_id: str, _: bool = Depends(verify_api_key)):
 def healthz():
     try:
         _ = _redis_conn().ping()
-        # Try a lightweight DB query
-        try:
-            dbmod.ensure_schema()
-            db_ok = True
-        except Exception:
-            db_ok = False
-        return {"ok": True, "db": db_ok}
+        redis_ok = True
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "redis": False, "error": str(e)}
+    # Try a lightweight DB query
+    try:
+        dbmod.ensure_schema()
+        db_ok = True
+    except Exception:
+        db_ok = False
+    s3_cfg = bool(S3_ENDPOINT and S3_ACCESS_KEY and S3_SECRET_KEY)
+    return {"ok": True, "redis": redis_ok, "db": db_ok, "s3_configured": s3_cfg}
 
 
 @app.get("/api/stats")
@@ -319,6 +370,18 @@ def _s3_client():
         config=Config(signature_version='s3v4'),
     )
 
+def _s3_public_client():
+    if not (S3_PUBLIC_ENDPOINT and S3_ACCESS_KEY and S3_SECRET_KEY):
+        return _s3_client()
+    return boto3.client(
+        's3',
+        endpoint_url=S3_PUBLIC_ENDPOINT,
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+        region_name=S3_REGION,
+        config=Config(signature_version='s3v4'),
+    )
+
 
 def _slug_from_url(u: str) -> str:
     try:
@@ -372,7 +435,8 @@ def visual_accept(data: dict, _: bool = Depends(verify_api_key)):
     try:
         cli.upload_file(str(sp), S3_BUCKET, key)
         ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
-        url_signed = cli.generate_presigned_url('get_object', Params={'Bucket': S3_BUCKET, 'Key': key}, ExpiresIn=ttl)
+        pres = _s3_public_client() or cli
+        url_signed = pres.generate_presigned_url('get_object', Params={'Bucket': S3_BUCKET, 'Key': key}, ExpiresIn=ttl)
         return {"ok": True, "baseline_key": key, "url": url_signed}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -383,14 +447,58 @@ def get_artifact(job_id: str, name: str, _: bool = Depends(verify_api_key)):
     """Redirect to the presigned URL stored in job status JSON.
     This acts as a simple download/stream endpoint for dashboard/CI.
     """
+    # Try status file first
+    info = None
     path = RESULTS_DIR / f"{job_id}.json"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Job not found")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    arts = data.get("artifact_urls") or {}
-    info = arts.get(name)
-    if isinstance(info, dict) and info.get("presigned_url"):
-        return RedirectResponse(url=str(info["presigned_url"]))
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            arts = data.get("artifact_urls") or {}
+            info = arts.get(name)
+        except Exception:
+            info = None
+    # Fallback to DB summary
+    if not info:
+        try:
+            res = dbmod.latest_result(job_id)
+            if res and isinstance(res.get("summary"), dict):
+                arts = res["summary"].get("artifact_urls") or {}
+                info = arts.get(name)
+        except Exception:
+            info = None
+    # If we have bucket/key, (re)sign on the fly using public endpoint to avoid stale signatures
+    if isinstance(info, dict):
+        bucket = info.get("bucket") or S3_BUCKET
+        key = info.get("key")
+        if not key:
+            # Try to find from DB summary
+            try:
+                res = dbmod.latest_result(job_id)
+                if res and isinstance(res.get("summary"), dict):
+                    arts2 = res["summary"].get("artifact_urls") or {}
+                    info2 = arts2.get(name)
+                    if isinstance(info2, dict):
+                        bucket = info2.get("bucket") or bucket
+                        key = info2.get("key") or key
+            except Exception:
+                pass
+        if key:
+            try:
+                cli = _s3_public_client()
+                ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
+                # Force inline display for common image types
+                ext = (Path(key).suffix or '').lower()
+                params = {'Bucket': bucket, 'Key': key}
+                if ext in {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'}:
+                    ctype = 'image/jpeg' if ext in {'.jpg', '.jpeg'} else f"image/{ext.lstrip('.')}"
+                    params['ResponseContentDisposition'] = 'inline'
+                    params['ResponseContentType'] = ctype
+                url = cli.generate_presigned_url('get_object', Params=params, ExpiresIn=ttl)
+                return RedirectResponse(url=str(url))
+            except Exception:
+                pass
+        if info.get("presigned_url"):
+            return RedirectResponse(url=str(info["presigned_url"]))
     raise HTTPException(status_code=404, detail="Artifact not found")
 
 
