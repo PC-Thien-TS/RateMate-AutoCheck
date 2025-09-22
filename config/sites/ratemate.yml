@@ -3,8 +3,12 @@ base_url: "https://store.ratemate.top"
 # Optional route lists the worker can crawl for multi‑route smoke
 routes:
   public:
+    - "/login"
     - "/en/login"
+    - "/en/register"
     - "/en/store"
+    - "/en/product"
+    - "/en/QR"
   # protected:
   #   - "/en/product"
 

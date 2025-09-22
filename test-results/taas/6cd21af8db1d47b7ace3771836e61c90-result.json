@@ -1,0 +1,84 @@
+{
+  "test_type": "smoke",
+  "passed": false,
+  "cases": [
+    {
+      "url": "https://store.ratemate.top/login",
+      "passed": true,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-1-screenshot.png",
+      "trace": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-1-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    },
+    {
+      "url": "https://store.ratemate.top/en/login",
+      "passed": false,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-2-screenshot.png",
+      "trace": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-2-trace.zip",
+      "error": null,
+      "missing_selectors": [
+        "input[type=\"email\"]"
+      ],
+      "visual": null
+    },
+    {
+      "url": "https://store.ratemate.top/en/register",
+      "passed": true,
+      "status_code": 200,
+      "title": "Register",
+      "screenshot": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-3-screenshot.png",
+      "trace": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-3-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    },
+    {
+      "url": "https://store.ratemate.top/en/store",
+      "passed": true,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-4-screenshot.png",
+      "trace": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-4-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    },
+    {
+      "url": "https://store.ratemate.top/en/product",
+      "passed": true,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-5-screenshot.png",
+      "trace": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-5-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    },
+    {
+      "url": "https://store.ratemate.top/en/QR",
+      "passed": true,
+      "status_code": 200,
+      "title": "Login",
+      "screenshot": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-6-screenshot.png",
+      "trace": "/workspace/test-results/taas/6cd21af8db1d47b7ace3771836e61c90-6-trace.zip",
+      "error": null,
+      "missing_selectors": null,
+      "visual": null
+    }
+  ],
+  "duration_sec": 19.67,
+  "performance": null,
+  "security": null,
+  "policy": {
+    "performance_ok": true,
+    "performance_reasons": null,
+    "security_ok": true,
+    "security_reasons": null,
+    "visual_threshold_pct": null
+  }
+}

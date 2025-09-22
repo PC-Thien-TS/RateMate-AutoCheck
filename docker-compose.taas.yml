@@ -61,6 +61,10 @@ services:
       - S3_BUCKET=taas-artifacts
       - S3_REGION=us-east-1
       - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Visual regression threshold (%). Fail when mismatch exceeds this.
+      - VISUAL_MAX_MISMATCH_PCT=${VISUAL_MAX_MISMATCH_PCT:-2.0}
+      # Auto-accept baseline when missing (1 to enable)
+      - VISUAL_AUTO_BASELINE=${VISUAL_AUTO_BASELINE:-0}
       - ARTIFACT_TTL_SECONDS=86400
       # Thresholds (optional)
       # - PERF_SCORE_MIN=80

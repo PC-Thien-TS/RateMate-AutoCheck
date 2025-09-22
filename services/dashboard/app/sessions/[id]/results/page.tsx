@@ -4,6 +4,21 @@ import { useEffect, useState } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || 'dev-key';
+const S3_PUBLIC = process.env.NEXT_PUBLIC_S3_PUBLIC || 'http://localhost:9000';
+
+function rewriteUrl(u?: string | null): string | undefined {
+  if (!u) return u as any;
+  try {
+    const src = new URL(u);
+    if (src.host.startsWith('minio:')) {
+      const pub = new URL(S3_PUBLIC);
+      src.host = pub.host;
+      src.protocol = pub.protocol as any;
+      return src.toString();
+    }
+    return u;
+  } catch { return u; }
+}
 
 export default function ResultsPage({ params }: { params: { id: string }}) {
   const id = params.id;
@@ -14,8 +29,9 @@ export default function ResultsPage({ params }: { params: { id: string }}) {
 
   useEffect(() => {
     setLoading(true); setError(null);
-    fetch(`${API}/api/sessions/${id}/results?limit=50`, { headers: { 'x-api-key': API_KEY }})
-      .then(r => r.json()).then(setData).catch(e=> setError(String(e))).finally(()=> setLoading(false));
+    fetch(`${API}/api/sessions/${id}/results?limit=50&api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY }})
+      .then(async r => { if (!r.ok) throw new Error(await r.text().catch(()=>r.statusText)); return r.json(); })
+      .then(setData).catch(e=> setError(String(e))).finally(()=> setLoading(false));
   }, [id]);
 
   const toggle = (rid: number) => {
@@ -70,6 +86,8 @@ export default function ResultsPage({ params }: { params: { id: string }}) {
             const alerts = r?.summary?.security?.alerts || [];
             const perfScore = r?.summary?.performance?.performance_score;
             const counts = r?.summary?.security?.counts || {};
+            const cases: any[] = Array.isArray(r?.summary?.cases) ? r.summary.cases : [];
+            const arts: Record<string, any> = (r?.summary?.artifact_urls || {}) as any;
             return (
               <tr key={r.id}>
                 <td><input type="checkbox" checked={selected.includes(r.id)} onChange={()=>toggle(r.id)} /></td>
@@ -77,12 +95,57 @@ export default function ResultsPage({ params }: { params: { id: string }}) {
                 <td>{new Date(r.created_at).toLocaleString()}</td>
                 <td>{typeof perfScore==='number'? perfScore: ''}</td>
                 <td>{`H${counts.High||0}/M${counts.Medium||0}/L${counts.Low||0}`}</td>
-                <td><pre style={{ whiteSpace:'pre-wrap', maxWidth: '800px', overflow:'auto' }}>{JSON.stringify({ performance: r.summary?.performance?.performance_score, policy: r.summary?.policy }, null, 2)}</pre></td>
+                <td>
+                  <pre style={{ whiteSpace:'pre-wrap', maxWidth: '800px', overflow:'auto' }}>{JSON.stringify({ performance: r.summary?.performance?.performance_score, policy: r.summary?.policy, cases: cases.length }, null, 2)}</pre>
+                  {cases.length>0 && (
+                    <details>
+                      <summary>Cases ({cases.length})</summary>
+                      <table cellPadding={8} border={1} style={{ marginTop: 6, borderCollapse:'collapse', width:'100%', background:'#fff', color:'#111' }}>
+                        <thead>
+                          <tr style={{ background:'#f5f5f5' }}>
+                            <th>#</th>
+                            <th>URL</th>
+                            <th>Status</th>
+                            <th>HTTP</th>
+                            <th>Visual</th>
+                            <th>Artifacts</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cases.map((c:any, i:number) => {
+                            const ok = !!c.passed;
+                            const v = c.visual || {};
+                            const sKey = `screenshot_${i+1}`;
+                            const tKey = `trace_${i+1}`;
+                            const sUrl = rewriteUrl(arts?.[sKey]?.presigned_url);
+                            const tUrl = rewriteUrl(arts?.[tKey]?.presigned_url);
+                            return (
+                              <tr key={i} style={{ background: ok ? '#f6ffed' : '#fff2f0' }}>
+                                <td>{i+1}</td>
+                                <td style={{ maxWidth: 520, wordBreak:'break-all' }}>{c.url}</td>
+                                <td>
+                                  <span style={{ padding:'2px 8px', borderRadius:12, background: ok ? '#d9f7be' : '#ffccc7', color: ok ? '#135200' : '#a8071a', fontWeight:600 }}>{ok? 'passed':'failed'}</span>
+                                </td>
+                                <td>{c.status_code ?? ''}</td>
+                                <td>{v.baseline_missing? 'baseline missing' : (typeof v.mismatch_pct==='number'? `${v.mismatch_pct}%` : '')}</td>
+                                <td>
+                                  {sUrl && (<a href={sUrl} target="_blank" rel="noreferrer">screenshot</a>)}
+                                  {sUrl && tUrl && ' | '}
+                                  {tUrl && (<a href={tUrl} target="_blank" rel="noreferrer">trace</a>)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </details>
+                  )}
+                </td>
                 <td>
                   <div>{alerts.length} alerts</div>
-                  <a href={`${API}/api/results/${r.id}/alerts.csv`} target="_blank">CSV</a>
+                  <a href={`${API}/api/results/${r.id}/alerts.csv?api_key=${encodeURIComponent(API_KEY)}`} target="_blank">CSV</a>
                   <span> | </span>
-                  <a href={`${API}/api/results/${r.id}/alerts.json`} target="_blank">JSON</a>
+                  <a href={`${API}/api/results/${r.id}/alerts.json?api_key=${encodeURIComponent(API_KEY)}`} target="_blank">JSON</a>
                 </td>
               </tr>
             );

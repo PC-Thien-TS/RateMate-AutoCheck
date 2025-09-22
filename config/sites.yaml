@@ -8,7 +8,9 @@ sites:
     register_path: "/en/register"   # nếu form đăng ký chung trang login, đổi lại "/en/login"
     locales: ["en"]                  # thêm "vi" nếu site đã bật tiếng Việt
     routes:
+      - "/login"
       - "/en/login"
+      - "/en/register"
       - "/en/store"
       - "/en/product"
       - "/en/QR"

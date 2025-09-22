@@ -72,9 +72,9 @@ export default function Page({ params }: { params: { id: string } }) {
     return (
       <div>
         <h3>Cases</h3>
-        <table cellPadding={6} border={1} style={{ borderCollapse:'collapse', width:'100%' }}>
+        <table cellPadding={8} border={1} style={{ borderCollapse:'collapse', width:'100%', background:'#fff', color:'#111' }}>
           <thead>
-            <tr>
+            <tr style={{ background:'#f5f5f5' }}>
               <th>#</th>
               <th>URL</th>
               <th>Status</th>
@@ -92,13 +92,15 @@ export default function Page({ params }: { params: { id: string } }) {
               const sUrl = getArt(sKey);
               const tUrl = getArt(tKey);
               return (
-                <tr key={i} style={{ background: ok ? '#102a12' : '#2a1010' }}>
+                <tr key={i} style={{ background: ok ? '#f6ffed' : '#fff2f0' }}>
                   <td>{i+1}</td>
-                  <td style={{ maxWidth: 420, wordBreak:'break-all' }}>{c.url}</td>
-                  <td style={{ color: ok ? '#4caf50' : '#ff6b6b' }}>{ok? 'passed':'failed'}</td>
+                  <td style={{ maxWidth: 520, wordBreak:'break-all' }}>{c.url}</td>
+                  <td>
+                    <span style={{ padding:'2px 8px', borderRadius:12, background: ok ? '#d9f7be' : '#ffccc7', color: ok ? '#135200' : '#a8071a', fontWeight:600 }}>{ok? 'passed':'failed'}</span>
+                  </td>
                   <td>{c.status_code ?? ''}</td>
                   <td>{c.title ?? ''}</td>
-                  <td style={{ color:'#ffd166' }}>{Array.isArray(c.missing_selectors)? c.missing_selectors.join(', ') : (c.missing_selectors || '')}</td>
+                  <td style={{ color:'#cf1322' }}>{Array.isArray(c.missing_selectors)? c.missing_selectors.join(', ') : (c.missing_selectors || '')}</td>
                   <td>
                     <a href={sUrl} target="_blank" rel="noreferrer">screenshot</a>
                     {" | "}

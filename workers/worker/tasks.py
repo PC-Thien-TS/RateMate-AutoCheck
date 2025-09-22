@@ -267,7 +267,8 @@ def run_web_test(job_id: str, payload: Dict):
                     diff_path = RESULTS_DIR / f"{job_id}-{idx+1}-visual-diff.png"
                     passed_visual = True
                     auto_base = os.getenv('VISUAL_AUTO_BASELINE','0') == '1'
-                    threshold = float(os.getenv('VISUAL_THRESHOLD_PCT', '0.1'))
+                    # Allow both names; default 2.0 (%)
+                    threshold = float(os.getenv('VISUAL_MAX_MISMATCH_PCT', os.getenv('VISUAL_THRESHOLD_PCT', '2.0')))
                     if has_baseline:
                         try:
                             from PIL import Image, ImageChops  # pillow
@@ -319,6 +320,11 @@ def run_web_test(job_id: str, payload: Dict):
                     context.close(); browser.close()
                 except Exception:
                     pass
+            # Combine visual gating into pass/fail when baseline exists
+            if isinstance(visual, dict) and not visual.get('baseline_missing'):
+                if visual.get('passed') is False:
+                    passed = False
+
             case_results.append({
                 "url": target,
                 "passed": passed,
@@ -559,7 +565,7 @@ def run_web_test(job_id: str, payload: Dict):
             "error": r0.get("error"),
             "performance": perf_result,
             "security": zap_result,
-            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None},
+            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None, "visual_ok": r0.get('visual',{}).get('passed') if r0.get('visual') else None, "visual_threshold_pct": threshold if 'threshold' in locals() else None},
         }
     else:
         result = {
@@ -569,7 +575,7 @@ def run_web_test(job_id: str, payload: Dict):
             "duration_sec": elapsed,
             "performance": perf_result,
             "security": zap_result,
-            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None},
+            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None, "visual_threshold_pct": threshold if 'threshold' in locals() else None},
         }
     out_path = RESULTS_DIR / f"{job_id}-result.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
