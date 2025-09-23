@@ -37,6 +37,7 @@ services:
       - perf
       - zap
       - postgres
+    restart: unless-stopped
     develop:
       watch:
         - path: ./services/api-gateway
@@ -82,6 +83,7 @@ services:
       - zap
       - postgres
       - minio
+    restart: unless-stopped
     develop:
       watch:
         - path: ./workers/worker
@@ -90,17 +92,22 @@ services:
   dashboard:
     build:
       context: ./services/dashboard
+      args:
+        - NEXT_PUBLIC_API_KEY=${NEXT_PUBLIC_API_KEY:-dev-key}
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_API_KEY=dev-key
+      - NEXT_PUBLIC_API_KEY=${NEXT_PUBLIC_API_KEY:-dev-key}
       - NEXT_PUBLIC_S3_PUBLIC=http://localhost:9000
+      # Pass Admin Token to the frontend
+      - NEXT_PUBLIC_ADMIN_TOKEN=${ADMIN_TOKEN:-}
       # Optional simple protection
       # Set DASH_TOKEN to enable a simple password for dashboard
-      # - DASH_TOKEN=changeme
+      - DASH_TOKEN=${DASH_TOKEN:-}
     ports:
       - "3000:3000"
     depends_on:
       - api
+    restart: unless-stopped
     develop:
       watch:
         - path: ./services/dashboard

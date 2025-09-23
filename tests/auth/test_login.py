@@ -1,5 +1,6 @@
 # tests/auth/test_login.py
 import contextlib
+import os
 import pytest
 from pages.auth.login_page import LoginPage
 from pages.common_helpers import ResponseLike as LoginResult
@@ -101,3 +102,72 @@ def test_login_slow_network(new_page, site, base_url, auth_paths, credentials):
     assert resp.status in (200, 302), f"Unexpected login HTTP status: {resp.status}, body={resp.body}"
     assert "dashboard" in new_page.url.lower() or "profile" in new_page.url.lower(), \
         f"Unexpected final URL after login: {new_page.url}"
+
+
+@pytest.mark.auth
+@pytest.mark.tc(id="RM-LOGIN-005", title="Reject wrong email", area="Auth", severity="Medium")
+def test_login_wrong_email(new_page, site, base_url, auth_paths, credentials):
+    if not credentials.get("password"):
+        pytest.skip("Missing E2E_PASSWORD; skipping")
+
+    login: LoginPage = _login_page(new_page, base_url, auth_paths)
+    login.goto()
+    # Use a clearly non-existent email format or domain
+    non_existent_email = f"not-a-real-user-{os.urandom(4).hex()}@example-domain.com"
+    resp: LoginResult = login.login(non_existent_email, credentials["password"])
+
+    bad_statuses = {400, 401, 403, 409, 422}
+    if getattr(resp, "status", None) in bad_statuses:
+        return
+
+    has_err, txt = has_error(new_page)
+    if has_err:
+        return
+
+    try:
+        still_on_login = bool(LOGIN_URL_RE.search(new_page.url))
+    except Exception:
+        still_on_login = True
+
+    any_field_error = False
+    with contextlib.suppress(Exception):
+        any_field_error = new_page.locator(
+            ":is(.ant-form-item-explain-error,[aria-invalid='true'])"
+        ).first.is_visible(timeout=1500)
+
+    assert still_on_login or any_field_error, \
+        f"Expected error (status/UI/fallback) for wrong email; got: {txt[:200]}"
+
+
+@pytest.mark.auth
+@pytest.mark.tc(id="RM-LOGIN-006", title="Login with empty email", area="Auth", severity="Low")
+def test_login_empty_email(new_page, site, base_url, auth_paths, credentials):
+    if not credentials.get("password"):
+        pytest.skip("Missing E2E_PASSWORD; skipping")
+        
+    login: LoginPage = _login_page(new_page, base_url, auth_paths)
+    login.goto()
+    login.login("", credentials["password"])
+
+    assert LOGIN_URL_RE.search(new_page.url), f"Unexpected redirect from login: {new_page.url}"
+
+    has_err, txt = has_error(new_page)
+    assert has_err, "No error message for empty email"
+    assert "required" in txt.lower() or "empty" in txt.lower(), f"Unexpected error message: {txt}"
+
+
+@pytest.mark.auth
+@pytest.mark.tc(id="RM-LOGIN-007", title="Login with empty password", area="Auth", severity="Low")
+def test_login_empty_password(new_page, site, base_url, auth_paths, credentials):
+    if not credentials.get("email"):
+        pytest.skip("Missing E2E_EMAIL; skipping")
+
+    login: LoginPage = _login_page(new_page, base_url, auth_paths)
+    login.goto()
+    login.login(credentials["email"], "")
+
+    assert LOGIN_URL_RE.search(new_page.url), f"Unexpected redirect from login: {new_page.url}"
+
+    has_err, txt = has_error(new_page)
+    assert has_err, "No error message for empty password"
+    assert "required" in txt.lower() or "empty" in txt.lower(), f"Unexpected error message: {txt}"

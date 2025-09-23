@@ -1,5 +1,5 @@
 # tests/auth/test_register.py
-import os, re, pytest, contextlib
+import os, re, pytest, contextlib, time
 from pages.factory import PageFactory
 
 _ERR_RE_DUP = re.compile(r"(exist|already|duplicate|taken|registered|trùng|đã\s*tồn|invalid|error)", re.I)
@@ -64,3 +64,34 @@ def test_register_existing_email_wrong_password_shows_error(new_page, site, base
         return
 
     assert _fallback_still_on_register_or_signin(new_page, auth_paths), f"Expected password error (status/UI/url); got msg='{msg}'"
+
+
+@pytest.mark.auth
+@pytest.mark.write
+@pytest.mark.skipif(os.getenv("E2E_ALLOW_WRITE") != "1", reason="E2E_ALLOW_WRITE is not 1")
+@pytest.mark.tc(id="RM-REG-003", title="Register new user successfully", area="Auth", severity="High")
+def test_register_success(new_page, site, base_url, auth_paths):
+    reg = _factory(new_page, site, base_url, auth_paths).register()
+    reg.goto()
+
+    # Generate a unique email and a secure password
+    timestamp = int(time.time())
+    new_email = f"testuser.{timestamp}@example.com"
+    new_password = f"SecureP@ssw0rd_{timestamp}!"
+    full_name = "Test User"
+
+    resp = reg.register_email(new_email, new_password, full_name, wait_response_ms=15000)
+
+    # Expect a successful status code (e.g., 200, 201) or a redirect (3xx)
+    assert resp and resp.status in {200, 201, 302, 303, 307}, f"Registration failed with status {getattr(resp, 'status', 'N/A')}"
+
+    # After successful registration, user might be redirected to login or dashboard
+    with contextlib.suppress(Exception):
+        new_page.wait_for_load_state("networkidle", timeout=5000)
+
+    final_url = new_page.url
+    on_login_page = auth_paths["login"] in final_url
+    on_dashboard = "dashboard" in final_url or "profile" in final_url
+
+    assert on_login_page or on_dashboard, \
+        f"Expected to be on login or dashboard page after registration, but was on {final_url}"

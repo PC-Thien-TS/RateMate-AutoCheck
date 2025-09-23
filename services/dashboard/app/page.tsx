@@ -1,6 +1,7 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { useSearchParams } from 'next/navigation';
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "dev-key";
@@ -21,10 +22,11 @@ function useSessions(params: Record<string, string | number>) {
   return { data, loading, error };
 }
 
-export default function Home() {
+function HomeClient() {
+  const searchParams = useSearchParams();
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
-  const [project, setProject] = useState("");
+  const [project, setProject] = useState(searchParams.get('project') || "");
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("");
   const [testType, setTestType] = useState("");
@@ -33,12 +35,11 @@ export default function Home() {
   const { data, loading, error } = useSessions({ limit, offset, project, kind, status, test_type: testType, since, until });
   const [jobs, setJobs] = useState<Record<string, any>>({});
   const [auto, setAuto] = useState(true);
-  const [projects, setProjects] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`${API}/api/projects?api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } })
-      .then(r=>r.json()).then(js=> setProjects(js.items||[])).catch((e)=>{ console.warn('projects error', e) });
-  }, []);
+    // Update project from URL if it changes
+    setProject(searchParams.get('project') || '');
+  }, [searchParams]);
 
   // Enrich with job status for perf/security/links; poll if any pending
   useEffect(() => {
@@ -81,13 +82,7 @@ export default function Home() {
   return (
     <div>
       <section style={{ marginBottom: 12 }}>
-        <label>Project: 
-          <select value={project} onChange={e=>setProject(e.target.value)}>
-            <option value="">(all)</option>
-            {projects.map((p:any)=> (<option key={p.project} value={p.project}>{p.project} ({p.sessions})</option>))}
-          </select>
-        </label>
-        <label style={{ marginLeft: 12 }}>Kind: 
+        <label>Kind: 
           <select value={kind} onChange={e=>setKind(e.target.value)}>
             <option value="">(all)</option>
             <option value="web">web</option>
@@ -166,5 +161,13 @@ export default function Home() {
         <button onClick={()=> setOffset(offset + limit)}>Next</button>
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <HomeClient />
+    </Suspense>
   );
 }
