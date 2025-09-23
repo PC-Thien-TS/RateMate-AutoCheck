@@ -103,15 +103,17 @@ services:
       # Optional simple protection
       # Set DASH_TOKEN to enable a simple password for dashboard
       - DASH_TOKEN=${DASH_TOKEN:-}
+      - NODE_ENV=development
     ports:
       - "3000:3000"
     depends_on:
       - api
     restart: unless-stopped
-    develop:
-      watch:
-        - path: ./services/dashboard
-          action: rebuild
+    volumes:
+      - ./services/dashboard:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
 
   perf:
     build:
