@@ -24,6 +24,28 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR = Path(os.getenv("TAAS_UPLOAD_DIR", str(RESULTS_DIR / "uploads"))).resolve()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+UPLOAD_MAX_MB = None
+try:
+    _upload_mb_raw = os.getenv("TAAS_UPLOAD_MAX_MB")
+    if _upload_mb_raw not in (None, ""):
+        UPLOAD_MAX_MB = max(0, int(float(_upload_mb_raw)))
+    else:
+        UPLOAD_MAX_MB = 200
+except Exception:
+    UPLOAD_MAX_MB = 200
+UPLOAD_MAX_BYTES = (UPLOAD_MAX_MB or 0) * 1024 * 1024
+
+
+def _parse_allowed_exts(raw: str | None) -> set[str]:
+    default = {".apk", ".aab", ".ipa", ".zip"}
+    if not raw:
+        return default
+    out = {f".{ext.strip().lstrip('.').lower()}" for ext in raw.split(',') if ext.strip()}
+    return out or default
+
+UPLOAD_ALLOWED_EXTS = _parse_allowed_exts(os.getenv("TAAS_UPLOAD_ALLOWED_EXTS"))
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 QUEUE_NAME = os.getenv("TAAS_QUEUE_NAME", "taas")
 API_KEY = os.getenv("API_KEY", "dev-key")
@@ -209,19 +231,39 @@ def enqueue_mobile(req: MobileTestRequest, _: bool = Depends(verify_api_key)):
 
 @app.post("/api/upload/mobile")
 def upload_mobile(file: UploadFile = File(...), _: bool = Depends(verify_api_key)):
+    dst: Path | None = None
     try:
-        suffix = Path(file.filename or "upload.bin").suffix.lower()
+        original_name = file.filename or "upload.bin"
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in UPLOAD_ALLOWED_EXTS:
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"Unsupported file type: {suffix or 'unknown'}")
         name = f"{uuid.uuid4().hex}{suffix}"
         dst = UPLOAD_DIR / name
-        with dst.open("wb") as f:
+        total = 0
+        with dst.open("wb") as fh:
             while True:
-                chunk = file.file.read(1024 * 1024)
+                chunk = file.file.read(UPLOAD_CHUNK_BYTES)
                 if not chunk:
                     break
-                f.write(chunk)
-        return {"path": str(dst), "filename": file.filename, "size": dst.stat().st_size}
+                total += len(chunk)
+                if UPLOAD_MAX_BYTES and total > UPLOAD_MAX_BYTES:
+                    limit_mb = UPLOAD_MAX_MB or int(UPLOAD_MAX_BYTES / (1024 * 1024))
+                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"File too large (>{limit_mb} MB)")
+                fh.write(chunk)
+        return {"path": str(dst), "filename": original_name, "size": total}
+    except HTTPException:
+        if dst and dst.exists():
+            dst.unlink(missing_ok=True)
+        raise
     except Exception as e:
+        if dst and dst.exists():
+            dst.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            file.file.close()
+        except Exception:
+            pass
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobStatusResponse)

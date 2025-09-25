@@ -41,6 +41,9 @@ Resp: giống web
 
 Multipart form-data with key `file` (apk/ipa). Returns `{ path, filename, size }`.
 
+- Enforced limits via `TAAS_UPLOAD_MAX_MB` (default 200 MB) and `TAAS_UPLOAD_ALLOWED_EXTS` (default apk, ipa, aab, zip); request > limit -> HTTP 413, unsupported type -> 415.
+- Uploaded artifacts stored under `/workspace/test-results/taas/uploads`; worker cleans them unless `TAAS_KEEP_UPLOADS=1`.
+
 ## GET /api/jobs/{job_id}
 
 Resp

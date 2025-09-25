@@ -27,7 +27,10 @@ export default function RunMobile() {
       const up = await fetch(`${API}/api/upload/mobile`, { method: 'POST', headers: { 'x-api-key': API_KEY }, body: fd });
       if (!up.ok) throw new Error(await up.text());
       const info = await up.json();
-      const body: any = { apk_path: info.path, test_type: 'analyze' };
+      const lowered = (file.name || '').toLowerCase();
+      const pathKey = lowered.endsWith('.ipa') ? 'ipa_path' : 'apk_path';
+      const body: any = { test_type: 'analyze' };
+      body[pathKey] = info.path;
       if (project) body.project = project;
       const enq = await fetch(`${API}/api/test/mobile`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY }, body: JSON.stringify(body) });
       if (!enq.ok) throw new Error(await enq.text());
@@ -40,7 +43,10 @@ export default function RunMobile() {
     <div>
       <h2>Run Mobile Analyze (APK/IPA)</h2>
       <form onSubmit={submit}>
-        <input type="file" accept=".apk,.ipa" onChange={e=> setFile(e.target.files?.[0] || null)} />
+        <input type="file" accept=".apk,.aab,.ipa,.zip" onChange={e=> setFile(e.target.files?.[0] || null)} />
+        <div style={{ fontSize: 12, color: '#595959', marginTop: 4 }}>
+          Allowed: .apk, .aab, .ipa, .zip (default 200 MB limit).
+        </div>
         <button type="submit" disabled={loading || !file} style={{ marginLeft: 8 }}>{loading? 'Submitting…' : 'Upload & Run'}</button>
       </form>
       <div style={{ marginTop:8 }}>

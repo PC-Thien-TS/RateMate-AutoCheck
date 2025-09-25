@@ -25,24 +25,33 @@ const QualitySummary = ({ summary }: { summary: any }) => {
   const perfScore = summary?.performance?.performance_score;
   const zapCounts = summary?.security?.counts;
   const policy = summary?.policy || {};
-
-  if (perfScore === undefined && !zapCounts) {
+  const riskScoreRaw = typeof summary?.risk_score === 'number' ? summary.risk_score : (typeof policy?.risk_score === 'number' ? policy.risk_score : undefined);
+  const riskScore = typeof riskScoreRaw === 'number' ? riskScoreRaw : undefined;
+  const riskOk = typeof policy?.risk_ok === 'boolean' ? policy.risk_ok : undefined;
+  const riskReasons = Array.isArray(policy?.risk_reasons) ? policy.risk_reasons : (policy?.risk_reasons ? [policy.risk_reasons] : []);
+  const hasContent = typeof perfScore === 'number' || !!zapCounts || typeof riskScore === 'number';
+  if (!hasContent) {
     return null;
   }
-
+  const policyBadge = (value?: boolean) => {
+    if (typeof value !== 'boolean') return null;
+    return (
+      <div style={{ color: value ? '#389e0d' : '#cf1322', fontWeight: 'bold' }}>
+        Policy: {value ? 'Passed' : 'Failed'}
+      </div>
+    );
+  };
   return (
     <div style={{ marginBottom: 16, border: '1px solid #ddd', padding: '0 12px', borderRadius: 8, background: '#fff' }}>
       <h3>Quality Summary</h3>
-      <div style={{ display: 'flex', gap: 32, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
         {typeof perfScore === 'number' && (
           <div>
             <h4>Performance</h4>
             <div style={{ fontSize: 36, fontWeight: 'bold', color: perfScore > 89 ? '#389e0d' : perfScore > 49 ? '#d46b08' : '#cf1322' }}>
               {perfScore}
             </div>
-            <div style={{ color: policy.performance_ok ? '#389e0d' : '#cf1322', fontWeight: 'bold' }}>
-              Policy: {policy.performance_ok ? '✓ Passed' : '✗ Failed'}
-            </div>
+            {policyBadge(policy.performance_ok)}
           </div>
         )}
         {zapCounts && (
@@ -59,9 +68,21 @@ const QualitySummary = ({ summary }: { summary: any }) => {
                 <span style={{ fontSize: 28, color: '#096dd9', fontWeight: 'bold' }}>{zapCounts.Low || 0}</span> Low
               </div>
             </div>
-             <div style={{ marginTop: 4, color: policy.security_ok ? '#389e0d' : '#cf1322', fontWeight: 'bold' }}>
-              Policy: {policy.security_ok ? '✓ Passed' : '✗ Failed'}
+            {policyBadge(policy.security_ok)}
+          </div>
+        )}
+        {typeof riskScore === 'number' && (
+          <div>
+            <h4>Mobile Risk</h4>
+            <div style={{ fontSize: 28, fontWeight: 'bold', color: riskScore <= 40 ? '#389e0d' : riskScore <= 70 ? '#d46b08' : '#cf1322' }}>
+              {riskScore}
             </div>
+            {policyBadge(riskOk)}
+            {riskReasons.length > 0 && (
+              <div style={{ fontSize: 12, maxWidth: 260, color: '#8c8c8c' }}>
+                Reasons: {riskReasons.join(', ')}
+              </div>
+            )}
           </div>
         )}
       </div>

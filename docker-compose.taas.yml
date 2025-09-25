@@ -13,6 +13,8 @@ services:
       - API_KEY=${API_KEY:-dev-key}
       - TAAS_RESULTS_DIR=/workspace/test-results/taas
       - TAAS_UPLOAD_DIR=/workspace/test-results/taas/uploads
+      - TAAS_UPLOAD_MAX_MB=${TAAS_UPLOAD_MAX_MB:-200}
+      - TAAS_UPLOAD_ALLOWED_EXTS=${TAAS_UPLOAD_ALLOWED_EXTS:-apk,ipa,aab,zip}
       # ADMIN_TOKEN should be provided via environment/secrets in non-dev setups
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
       # S3/MinIO for baseline acceptance and artifact redirects
@@ -48,6 +50,8 @@ services:
       context: ./workers/worker
     environment:
       - TAAS_RESULTS_DIR=/workspace/test-results/taas
+      - TAAS_UPLOAD_DIR=/workspace/test-results/taas/uploads
+      - TAAS_KEEP_UPLOADS=${TAAS_KEEP_UPLOADS:-0}
       - RQ_REDIS_URL=redis://redis:6379/0
       # Postgres
       - PGHOST=postgres

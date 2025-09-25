@@ -6,3 +6,4 @@ report/
 *.log
 .env
 node_modules/
+.next/

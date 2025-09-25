@@ -1,0 +1,75 @@
+{
+  "job_id": "53dc9318dc5b4bd5857d2ce94669028b",
+  "status": "completed",
+  "kind": "web",
+  "payload": {
+    "url": "https://store.ratemate.top/",
+    "test_type": "smoke",
+    "site": "ratemate",
+    "routes": null,
+    "project": "ratemate"
+  },
+  "result_path": "/workspace/test-results/taas/53dc9318dc5b4bd5857d2ce94669028b-result.json",
+  "artifact_urls": {
+    "screenshot_1": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-1-screenshot.png",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-1-screenshot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=ff3e319bc3a00deb8f2a9945942d47a3c53c8b9fae50d27fa9eabfa693a47b28"
+    },
+    "trace_1": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-1-trace.zip",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-1-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=8b919ccfc1afd28340340d5c52b9013ff66ab54a56728390f400b08ed3b9c425"
+    },
+    "screenshot_2": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-2-screenshot.png",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-2-screenshot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=027b9e8d541d7c09ebccdf66e9e9da8b812c5a5aeb48a41ca049f7a9460b90e3"
+    },
+    "trace_2": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-2-trace.zip",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-2-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=c11e6518c6fac17d1b25d45ef46042c7a483ef9ece9d6535b6fc4902c5191ed8"
+    },
+    "screenshot_3": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-3-screenshot.png",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-3-screenshot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=703a366fc42c8a94d358538234cbe658164411b3e583e56da55106cfe74d5e84"
+    },
+    "trace_3": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-3-trace.zip",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-3-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=6b0fa56068a4482fef817fc4af61fe30f5c833967e72d8644a513369c4b7e21b"
+    },
+    "screenshot_4": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-4-screenshot.png",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-4-screenshot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=72bd5de94012c23a49ca8a645fb91636d3267eac68d4caaf52f0b1bddac8e2fc"
+    },
+    "trace_4": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-4-trace.zip",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-4-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=5dde5a4cb51b70997c6a5c14ef46afc2fbaf1a7e30e0bd9ffa635963f39e2923"
+    },
+    "screenshot_5": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-5-screenshot.png",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-5-screenshot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=8fccf4e3a4c12a471460e24c60cdf3d9bca4a743d5a79bebe3249d20023279ae"
+    },
+    "trace_5": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-5-trace.zip",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-5-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=548bd157711609f211d2a31df7d916bc0dccc3c916d081994eaa657a7aca1eda"
+    },
+    "screenshot_6": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-6-screenshot.png",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-6-screenshot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=a4f15cdb464400c4339249cffdc4c84b7d4d2100d66b7ba16d7f65acdc15f331"
+    },
+    "trace_6": {
+      "bucket": "taas-artifacts",
+      "key": "53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-6-trace.zip",
+      "presigned_url": "http://localhost:9000/taas-artifacts/53dc9318dc5b4bd5857d2ce94669028b/53dc9318dc5b4bd5857d2ce94669028b-6-trace.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20250925%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250925T061756Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=6b79f67087f406fd657514be9c6f9922c826b61b174f6450e81f8a5120a2ad02"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "analyzer": "MobSF",
+  "configured": false,
+  "passed": true,
+  "summary": "MobSF not configured; skipped static analysis",
+  "job_id": "27672cecb19d4f139d60b2d3e2d1c6fd"
+}

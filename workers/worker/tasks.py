@@ -3,6 +3,7 @@ import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from contextlib import suppress
 
 from playwright.sync_api import sync_playwright
 import yaml
@@ -20,6 +21,9 @@ from redis import Redis
 
 RESULTS_DIR = Path(os.getenv("TAAS_RESULTS_DIR", "test-results/taas")).resolve()
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = Path(os.getenv("TAAS_UPLOAD_DIR", str(RESULTS_DIR / "uploads"))).resolve()
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+KEEP_UPLOADS = os.getenv("TAAS_KEEP_UPLOADS", "0") == "1"
 WORKSPACE = Path("/workspace").resolve()
 REDIS_URL = os.getenv("RQ_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
 
@@ -29,6 +33,104 @@ def _redis() -> Redis | None:
         return Redis.from_url(REDIS_URL)
     except Exception:
         return None
+
+
+def _cleanup_path(path: Path | None) -> None:
+    try:
+        if path and path.exists():
+            path.unlink()
+    except Exception:
+        pass
+
+
+def _s3_config() -> dict:
+    try:
+        ttl = int(os.getenv("ARTIFACT_TTL_SECONDS", "86400"))
+    except Exception:
+        ttl = 86400
+    return {
+        "endpoint_url": os.getenv("S3_ENDPOINT"),
+        "public_endpoint": os.getenv("S3_PUBLIC_ENDPOINT") or os.getenv("S3_ENDPOINT"),
+        "access_key": os.getenv("S3_ACCESS_KEY"),
+        "secret_key": os.getenv("S3_SECRET_KEY"),
+        "bucket": os.getenv("S3_BUCKET", "taas-artifacts"),
+        "region": os.getenv("S3_REGION", "us-east-1"),
+        "artifact_ttl": ttl,
+    }
+
+
+
+def _make_s3_client(cfg: dict, public: bool = False):
+    endpoint = cfg.get("public_endpoint") if public else cfg.get("endpoint_url")
+    access_key = cfg.get("access_key")
+    secret_key = cfg.get("secret_key")
+    if not (endpoint and access_key and secret_key):
+        return None
+    return boto3.client(
+        's3',
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=cfg.get("region"),
+        config=Config(signature_version='s3v4'),
+    )
+
+
+
+def _ensure_bucket(cli, bucket: str) -> None:
+    if not cli or not bucket:
+        return
+    try:
+        cli.head_bucket(Bucket=bucket)
+    except Exception:
+        try:
+            cli.create_bucket(Bucket=bucket)
+        except Exception:
+            pass
+
+
+
+def _upload_artifact(job_id: str, path: Path, cfg: dict) -> dict | None:
+    if not path or not path.exists():
+        return None
+    cli = _make_s3_client(cfg)
+    if not cli:
+        return None
+    bucket = cfg.get('bucket')
+    _ensure_bucket(cli, bucket)
+    key = f"{job_id}/{path.name}"
+    cli.upload_file(str(path), bucket, key)
+    pres = _make_s3_client(cfg, public=True) or cli
+    params = {'Bucket': bucket, 'Key': key}
+    inline_types = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.html': 'text/html',
+        '.htm': 'text/html',
+    }
+    ext = path.suffix.lower()
+    if ext in inline_types:
+        params['ResponseContentDisposition'] = 'inline'
+        params['ResponseContentType'] = inline_types[ext]
+    url = pres.generate_presigned_url('get_object', Params=params, ExpiresIn=max(60, int(cfg.get('artifact_ttl') or 86400)))
+    return {'bucket': bucket, 'key': key, 'presigned_url': url}
+
+
+
+def _download_from_s3(key: str, dest: Path, cfg: dict) -> bool:
+    cli = _make_s3_client(cfg)
+    if not cli or not key:
+        return False
+    try:
+        _ensure_bucket(cli, cfg.get('bucket'))
+        cli.download_file(cfg.get('bucket'), key, str(dest))
+        return True
+    except Exception:
+        return False
 
 
 def _is_canceled(job_id: str) -> bool:
@@ -205,6 +307,7 @@ def run_web_test(job_id: str, payload: Dict):
 
     case_results = []
     all_passed = True
+    s3cfg = _s3_config()
     t0 = time.time()
     if _is_canceled(job_id):
       _update(job_id, {"status": "canceled", "error": "canceled"}); return
@@ -294,10 +397,7 @@ def run_web_test(job_id: str, payload: Dict):
                     else:
                         if auto_base:
                             # set current as baseline
-                            cli = _s3()
-                            if cli:
-                                _ensure_bucket(cli)
-                                cli.upload_file(str(screenshot_path), s3cfg['bucket'], baseline_key)
+                            _push_baseline(screenshot_path, baseline_key)
                     visual = {
                         'baseline_key': baseline_key,
                         'baseline_missing': not has_baseline,
@@ -307,6 +407,9 @@ def run_web_test(job_id: str, payload: Dict):
                     }
                 except Exception:
                     visual = None
+
+                if isinstance(locals().get('base_tmp'), Path):
+                    _cleanup_path(base_tmp)
 
                 context.tracing.stop(path=str(trace_path))
                 context.close(); browser.close()
@@ -478,75 +581,24 @@ def run_web_test(job_id: str, payload: Dict):
             zap_result = {"error": str(e)}
             zap_ok = False
 
-    # Upload artifacts to S3/MinIO if configured
-    s3cfg = {
-        'endpoint_url': os.getenv('S3_ENDPOINT'),
-        'public_endpoint': os.getenv('S3_PUBLIC_ENDPOINT') or os.getenv('S3_ENDPOINT'),
-        'access_key': os.getenv('S3_ACCESS_KEY'),
-        'secret_key': os.getenv('S3_SECRET_KEY'),
-        'bucket': os.getenv('S3_BUCKET', 'taas-artifacts'),
-        'region': os.getenv('S3_REGION', 'us-east-1'),
-    }
-
-    def _s3() -> boto3.client:
-        return (
-            boto3.client(
-                's3',
-                endpoint_url=s3cfg['endpoint_url'],
-                aws_access_key_id=s3cfg['access_key'],
-                aws_secret_access_key=s3cfg['secret_key'],
-                region_name=s3cfg['region'],
-                config=Config(signature_version='s3v4'),
-            )
-            if s3cfg['endpoint_url'] and s3cfg['access_key'] and s3cfg['secret_key']
-            else None
-        )
-
-    def _s3_pub() -> boto3.client:
-        # Used only to generate presigned URLs with a public-facing host.
-        pe = s3cfg['public_endpoint'] or s3cfg['endpoint_url']
-        if not (pe and s3cfg['access_key'] and s3cfg['secret_key']):
-            return None
-        return boto3.client(
-            's3',
-            endpoint_url=pe,
-            aws_access_key_id=s3cfg['access_key'],
-            aws_secret_access_key=s3cfg['secret_key'],
-            region_name=s3cfg['region'],
-            config=Config(signature_version='s3v4'),
-        )
-
-    def _ensure_bucket(cli):
-        try:
-            cli.head_bucket(Bucket=s3cfg['bucket'])
-        except Exception:
-            try:
-                cli.create_bucket(Bucket=s3cfg['bucket'])
-            except Exception:
-                pass
-
+    # Upload helpers (shared with mobile)
     def _upload(path: Path) -> dict | None:
-        cli = _s3()
-        if not cli or not path or not path.is_file():
+        if not path:
             return None
-        _ensure_bucket(cli)
-        key = f"{job_id}/{path.name}"
-        cli.upload_file(str(path), s3cfg['bucket'], key)
-        ttl = int(os.getenv('ARTIFACT_TTL_SECONDS', '86400'))
-        pres = _s3_pub() or cli
-        url = pres.generate_presigned_url('get_object', Params={'Bucket': s3cfg['bucket'], 'Key': key}, ExpiresIn=ttl)
-        return { 'bucket': s3cfg['bucket'], 'key': key, 'presigned_url': url }
+        return _upload_artifact(job_id, path, s3cfg)
 
     def _download_baseline(key: str, dest: Path) -> bool:
-        cli = _s3()
+        return _download_from_s3(key, dest, s3cfg)
+
+    def _push_baseline(source: Path, key: str) -> None:
+        cli = _make_s3_client(s3cfg)
         if not cli:
-            return False
+            return
         try:
-            _ensure_bucket(cli)
-            cli.download_file(s3cfg['bucket'], key, str(dest))
-            return True
+            _ensure_bucket(cli, s3cfg.get('bucket'))
+            cli.upload_file(str(source), s3cfg.get('bucket'), key)
         except Exception:
-            return False
+            pass
 
     # For single URL keep backward-compatible shape
     if len(urls) == 1:
@@ -654,26 +706,127 @@ def run_web_test(job_id: str, payload: Dict):
 
 
 def run_mobile_test(job_id: str, payload: Dict):
+    start_time = time.time()
     _update(job_id, {"status": "running"})
+    if _is_canceled(job_id):
+        _update(job_id, {"status": "canceled", "error": "canceled"})
+        return
+
     test_type = (payload.get("test_type") or "analyze").lower()
+    s3cfg = _s3_config()
+
     if test_type == "analyze":
-        res = _mobile_analyze_mobsf(payload)
+        analysis = _mobile_analyze_mobsf(payload, job_id)
     else:
-        # Placeholder for E2E (Appium/FTL) to be implemented later
-        res = {"test_type": test_type, "analyzer": "Appium", "summary": "E2E executed on device"}
-    # attach job_id to allow proper naming of MobSF report
-    res_with_id = dict(res)
-    res_with_id['job_id'] = job_id
+        analysis = {"test_type": test_type, "analyzer": "Appium", "summary": "E2E executed on device", "configured": False, "passed": True}
+
+    duration = round(time.time() - start_time, 2)
+    try:
+        risk_threshold = float(os.getenv("MOBSF_MAX_RISK_SCORE", "50"))
+    except Exception:
+        risk_threshold = 50.0
+
+    risk_score = analysis.get("risk_score")
+    risk_ok = True
+    risk_reasons: List[str] = []
+    if isinstance(risk_score, (int, float)) and risk_threshold > 0:
+        if risk_score > risk_threshold:
+            risk_ok = False
+            risk_reasons.append(f"risk>{risk_threshold}")
+
+    passed = bool(analysis.get("passed", True) and risk_ok)
+    summary = {
+        "job_id": job_id,
+        "test_type": test_type,
+        "analyzer": analysis.get("analyzer"),
+        "configured": analysis.get("configured", False),
+        "passed": passed,
+        "summary": analysis.get("summary"),
+        "risk_score": risk_score,
+        "hash": analysis.get("hash"),
+        "scan_type": analysis.get("scan_type"),
+        "permissions": analysis.get("permissions"),
+        "endpoints": analysis.get("endpoints"),
+        "error": analysis.get("error"),
+        "duration_sec": duration,
+        "policy": {
+            "risk_ok": risk_ok,
+            "risk_threshold": risk_threshold,
+            "risk_score": risk_score,
+            "risk_reasons": risk_reasons or None,
+        },
+    }
+
+    artifacts: Dict[str, dict] = {}
+    report_path = analysis.get("report_path")
+    if report_path:
+        uploaded = _upload_artifact(job_id, Path(report_path), s3cfg)
+        if uploaded:
+            artifacts["mobsf_html"] = uploaded
+    summary["artifact_urls"] = artifacts or None
+
     out_path = RESULTS_DIR / f"{job_id}-result.json"
-    out_path.write_text(json.dumps(res_with_id, ensure_ascii=False, indent=2), encoding="utf-8")
-    status = "completed" if res.get("passed", True) else "failed"
-    final = {"status": status, "result_path": str(out_path)}
-    if res.get("error"):
-        final["error"] = res["error"]
-    _update(job_id, final)
+    out_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    final_status = "completed" if passed else "failed"
+    final_payload = {"status": final_status, "result_path": str(out_path)}
+    if analysis.get("error"):
+        final_payload["error"] = str(analysis["error"])
+    if artifacts:
+        final_payload["artifact_urls"] = artifacts
+
+    if _is_canceled(job_id):
+        _update(job_id, {"status": "canceled", "error": "canceled"})
+        return
+
+    _update(job_id, final_payload)
+
+    # Persist to Postgres if configured
+    try:
+        dsn = {
+            "host": os.getenv("PGHOST", "postgres"),
+            "port": int(os.getenv("PGPORT", "5432")),
+            "user": os.getenv("PGUSER", "taas"),
+            "password": os.getenv("PGPASSWORD", "taas"),
+            "dbname": os.getenv("PGDATABASE", "taas"),
+        }
+        with psycopg2.connect(**dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("update test_sessions set status=%s, updated_at=now() where id=%s", (final_status, job_id))
+                cur.execute("insert into test_results(session_id, summary) values (%s,%s)", (job_id, Json(summary)))
+            conn.commit()
+    except Exception:
+        pass
+
+    # Optional notification
+    try:
+        hook = os.getenv('SLACK_WEBHOOK_URL')
+        if hook:
+            lines = [f"job: {job_id}", f"type: {test_type}", f"status: {final_status}"]
+            if risk_score is not None:
+                lines.append(f"risk: {risk_score}")
+            for key, info in list(artifacts.items())[:4]:
+                if info and info.get('presigned_url'):
+                    lines.append(f"{key}: {info['presigned_url']}")
+            message_lines = [f"TaaS MOBILE {final_status.upper()}"] + lines
+            payload_msg = {"text": "\n".join(message_lines)}
+            requests.post(hook, json=payload_msg, timeout=10)
+    except Exception:
+        pass
+
+    if not KEEP_UPLOADS:
+        for key in ("apk_path", "ipa_path"):
+            val = payload.get(key)
+            if not val:
+                continue
+            p = Path(val)
+            with suppress(Exception):
+                resolved = p.resolve()
+                if resolved.is_file() and (resolved.parent == UPLOAD_DIR or UPLOAD_DIR in resolved.parents):
+                    _cleanup_path(resolved)
 
 
-def _mobile_analyze_mobsf(payload: Dict) -> Dict:
+def _mobile_analyze_mobsf(payload: Dict, job_id: str) -> Dict:
     mobsf_url = (os.getenv("MOBSF_URL") or "").rstrip("/")
     mobsf_key = os.getenv("MOBSF_API_KEY")
     apk_path = payload.get("apk_path")
@@ -681,7 +834,6 @@ def _mobile_analyze_mobsf(payload: Dict) -> Dict:
     apk_url = payload.get("apk_url")
     ipa_url = payload.get("ipa_url")
 
-    # If not configured, return graceful placeholder
     if not mobsf_url or not mobsf_key:
         return {
             "analyzer": "MobSF",
@@ -690,60 +842,55 @@ def _mobile_analyze_mobsf(payload: Dict) -> Dict:
             "summary": "MobSF not configured; skipped static analysis",
         }
 
+    temp_files: List[Path] = []
+    local_file: Optional[str] = None
     try:
-        # If a remote URL is provided, download into workspace tmp
-        local_file = None
         if apk_path or ipa_path:
             local_file = apk_path or ipa_path
         else:
             src = apk_url or ipa_url
             if not src:
                 raise ValueError("No APK/IPA provided")
-            r = requests.get(src, timeout=60)
-            r.raise_for_status()
-            ext = ".apk" if apk_url else ".ipa"
-            tmp = RESULTS_DIR / f"mobsf-{int(time.time())}{ext}"
-            tmp.write_bytes(r.content)
+            resp = requests.get(src, timeout=60)
+            resp.raise_for_status()
+            ext = ".apk" if (apk_url and not apk_url.endswith(".ipa")) else ".ipa"
+            tmp = RESULTS_DIR / f"mobsf-{job_id}-{int(time.time())}{ext}"
+            tmp.write_bytes(resp.content)
+            temp_files.append(tmp)
             local_file = str(tmp)
 
+        if not local_file:
+            raise ValueError("No APK/IPA provided")
+
         headers = {"Authorization": mobsf_key}
-        files = {"file": open(local_file, "rb")}
-        up = requests.post(f"{mobsf_url}/api/v1/upload", headers=headers, files=files, timeout=300)
-        files["file"].close()
-        up.raise_for_status()
-        meta = up.json()
+        with open(local_file, "rb") as fh:
+            files = {"file": fh}
+            upload_resp = requests.post(f"{mobsf_url}/api/v1/upload", headers=headers, files=files, timeout=300)
+        upload_resp.raise_for_status()
+        meta = upload_resp.json()
         hashv = meta.get("hash") or meta.get("md5") or meta.get("sha256")
         scan_type = meta.get("scan_type") or ("apk" if local_file.endswith(".apk") else "ipa")
 
-        # Trigger scan
         data = {"hash": hashv, "scan_type": scan_type}
-        scan = requests.post(f"{mobsf_url}/api/v1/scan", headers=headers, data=data, timeout=600)
-        if scan.status_code >= 400:
-            # Some MobSF versions use /api/v1/scan/{type}
-            scan = requests.post(f"{mobsf_url}/api/v1/scan/{scan_type}", headers=headers, data=data, timeout=600)
-        scan.raise_for_status()
+        scan_resp = requests.post(f"{mobsf_url}/api/v1/scan", headers=headers, data=data, timeout=600)
+        if scan_resp.status_code >= 400:
+            scan_resp = requests.post(f"{mobsf_url}/api/v1/scan/{scan_type}", headers=headers, data=data, timeout=600)
+        scan_resp.raise_for_status()
 
-        # Fetch JSON report
         rep = requests.post(f"{mobsf_url}/api/v1/report_json", headers=headers, data={"hash": hashv}, timeout=300)
         rep.raise_for_status()
         report_json = rep.json()
 
-        # Extract a few key fields (best-effort)
         perms = report_json.get("permissions") or report_json.get("apppermissions")
         endpoints = report_json.get("urls") or report_json.get("domains")
         risk = report_json.get("risk_score") or report_json.get("score")
 
-        # Try to get HTML report (if available)
         report_path = None
         try:
-            rh = requests.post(f"{mobsf_url}/api/v1/report", headers=headers, data={"hash": hashv}, timeout=300)
-            if rh.status_code < 400 and rh.text:
-                html_path = RESULTS_DIR / f"{payload.get('job_id','mobsf')}-mobsf.html"
-                # job_id not in scope here; caller will rename when integrating
-                # fallback: use epoch time in filename if not set by caller
-                if 'job_id' not in payload:
-                    html_path = RESULTS_DIR / f"mobsf-{int(time.time())}.html"
-                html_path.write_text(rh.text, encoding="utf-8")
+            html_resp = requests.post(f"{mobsf_url}/api/v1/report", headers=headers, data={"hash": hashv}, timeout=300)
+            if html_resp.status_code < 400 and html_resp.text:
+                html_path = RESULTS_DIR / f"{job_id}-mobsf.html"
+                html_path.write_text(html_resp.text, encoding="utf-8")
                 report_path = str(html_path)
         except Exception:
             report_path = None
@@ -760,5 +907,9 @@ def _mobile_analyze_mobsf(payload: Dict) -> Dict:
             "endpoints": endpoints,
             "report_path": report_path,
         }
-    except Exception as e:
-        return {"analyzer": "MobSF", "configured": True, "passed": False, "error": str(e)}
+    except Exception as exc:
+        return {"analyzer": "MobSF", "configured": True, "passed": False, "error": str(exc)}
+    finally:
+        for tmp in temp_files:
+            _cleanup_path(tmp)
+
