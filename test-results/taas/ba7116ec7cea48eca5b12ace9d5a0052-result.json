@@ -1,0 +1,22 @@
+{
+  "job_id": "ba7116ec7cea48eca5b12ace9d5a0052",
+  "test_type": "analyze",
+  "analyzer": "MobSF",
+  "configured": false,
+  "passed": true,
+  "summary": "MobSF not configured; skipped static analysis",
+  "risk_score": null,
+  "hash": null,
+  "scan_type": null,
+  "permissions": null,
+  "endpoints": null,
+  "error": null,
+  "duration_sec": 0.02,
+  "policy": {
+    "risk_ok": true,
+    "risk_threshold": 50.0,
+    "risk_score": null,
+    "risk_reasons": null
+  },
+  "artifact_urls": null
+}

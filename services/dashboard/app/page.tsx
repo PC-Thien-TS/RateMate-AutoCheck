@@ -1,19 +1,46 @@
 'use client';
 
-import { useEffect, useMemo, useState, Suspense } from "react";
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState, Suspense, FC, useReducer } from "react";
+import { useSearchParams, useRouter } from 'next/navigation'; // eslint-disable-line
+import SiteSwitcher from "../components/SiteSwitcher"; // eslint-disable-line
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "dev-key";
+interface Session {
+  id: string;
+  project: string;
+  kind: 'web' | 'mobile';
+  test_type: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
+  created_at: string;
+}
 
-function useSessions(params: Record<string, string | number>) {
-  const [data, setData] = useState<any>(null);
+interface PaginatedSessions {
+  items: Session[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+interface Job {
+  id: string;
+  status: Session['status'];
+  kind: Session['kind'];
+  payload: Record<string, any>;
+  performance?: { performance_score?: number };
+  security?: { counts?: { High?: number; Medium?: number; Low?: number } };
+  artifact_urls?: {
+    perf_html?: { presigned_url: string };
+    zap_html?: { presigned_url: string };
+  };
+}
+
+function useSessions(params: Record<string, string | number | undefined>) {
+  const [data, setData] = useState<PaginatedSessions | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const query = useMemo(() => new URLSearchParams(params as any).toString(), [params]);
+  const query = useMemo(() => new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v !== undefined)) as Record<string, string>).toString(), [params]);
   useEffect(() => {
     setLoading(true); setError(null);
-    fetch(`${API}/api/sessions?${query}&api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } })
+    fetch(`/api/proxy/api/sessions?${query}`)
       .then(async r => { if (!r.ok) throw new Error(await r.text().catch(()=>r.statusText)); return r.json(); })
       .then(setData)
       .catch(e => setError(String(e)))
@@ -21,49 +48,131 @@ function useSessions(params: Record<string, string | number>) {
   }, [query]);
   return { data, loading, error };
 }
+interface FiltersProps {
+  filterState: FilterState;
+  dispatch: import("react").Dispatch<FilterAction>;
+  onApply: () => void; // eslint-disable-line
+}
+
+const Filters: FC<FiltersProps> = ({ filterState, dispatch, onApply }) => (
+  <section style={{ marginBottom: 12, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+    <SiteSwitcher />
+    <label>Kind:
+      <select value={filterState.kind} onChange={e => dispatch({ type: 'SET_KIND', payload: e.target.value })}>
+        <option value="">(all)</option>
+        <option value="web">web</option>
+        <option value="mobile">mobile</option>
+      </select>
+    </label>
+    <label>Status:
+      <select value={filterState.status} onChange={e => dispatch({ type: 'SET_STATUS', payload: e.target.value })}>
+        <option value="">(all)</option>
+        <option value="queued">queued</option>
+        <option value="running">running</option>
+        <option value="completed">completed</option>
+        <option value="failed">failed</option>
+        <option value="canceled">canceled</option>
+      </select>
+    </label>
+    <label>Type:
+      <select value={filterState.testType} onChange={e => dispatch({ type: 'SET_TEST_TYPE', payload: e.target.value })}>
+        <option value="">(all)</option>
+        <option value="smoke">smoke</option>
+        <option value="auto">auto</option>
+        <option value="performance">performance</option>
+        <option value="security">security</option>
+        <option value="analyze">analyze</option>
+      </select>
+    </label>
+    <label>Since: <input type="datetime-local" value={filterState.since} onChange={e => dispatch({ type: 'SET_SINCE', payload: e.target.value })} /></label>
+    <label>Until: <input type="datetime-local" value={filterState.until} onChange={e => dispatch({ type: 'SET_UNTIL', payload: e.target.value })} /></label>
+    <label>Limit: <input type="number" value={filterState.limit} onChange={e => dispatch({ type: 'SET_LIMIT', payload: parseInt(e.target.value || "20") })} style={{ width: 60 }} /></label>
+    <button onClick={onApply}>Apply</button>
+  </section>
+);
+
+type FilterState = {
+  limit: number;
+  kind: string;
+  status: string;
+  testType: string;
+  since: string;
+  until: string;
+};
+
+type FilterAction =
+  | { type: 'SET_LIMIT'; payload: number }
+  | { type: 'SET_KIND'; payload: string }
+  | { type: 'SET_STATUS'; payload: string }
+  | { type: 'SET_TEST_TYPE'; payload: string }
+  | { type: 'SET_SINCE'; payload: string }
+  | { type: 'SET_UNTIL'; payload: string };
+
+const initialFilterState: FilterState = {
+  limit: 20,
+  kind: "",
+  status: "",
+  testType: "",
+  since: "",
+  until: "",
+};
+
+function filterReducer(state: FilterState, action: FilterAction): FilterState {
+  switch (action.type) {
+    case 'SET_LIMIT': return { ...state, limit: action.payload };
+    case 'SET_KIND': return { ...state, kind: action.payload };
+    case 'SET_STATUS': return { ...state, status: action.payload };
+    case 'SET_TEST_TYPE': return { ...state, testType: action.payload };
+    case 'SET_SINCE': return { ...state, since: action.payload };
+    case 'SET_UNTIL': return { ...state, until: action.payload };
+    default: return state;
+  }
+}
 
 function HomeClient() {
   const searchParams = useSearchParams();
-  const [limit, setLimit] = useState(20);
-  const [offset, setOffset] = useState(0);
-  const [project, setProject] = useState(searchParams.get('project') || "");
-  const [kind, setKind] = useState("");
-  const [status, setStatus] = useState("");
-  const [testType, setTestType] = useState("");
-  const [since, setSince] = useState("");
-  const [until, setUntil] = useState("");
-  const { data, loading, error } = useSessions({ limit, offset, project, kind, status, test_type: testType, since, until });
-  const [jobs, setJobs] = useState<Record<string, any>>({});
-  const [auto, setAuto] = useState(true);
+  const router = useRouter();
+  const project = searchParams.get('project') || "";
 
-  useEffect(() => {
-    // Update project from URL if it changes
-    setProject(searchParams.get('project') || '');
-  }, [searchParams]);
+  const [offset, setOffset] = useState(0);
+  const [filterState, dispatch] = useReducer(filterReducer, initialFilterState);
+
+  const { data, loading, error } = useSessions({
+    limit: filterState.limit,
+    offset,
+    project,
+    kind: filterState.kind,
+    status: filterState.status,
+    test_type: filterState.testType,
+    since: filterState.since ? new Date(filterState.since).toISOString() : undefined,
+    until: filterState.until ? new Date(filterState.until).toISOString() : undefined
+  });
+  const [jobs, setJobs] = useState<Record<string, Job | null>>({});
+  const [auto, setAuto] = useState(true);
 
   // Enrich with job status for perf/security/links; poll if any pending
   useEffect(() => {
-    let timer: any;
+    let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       if (!data?.items) return;
-      const ids: string[] = data.items.map((s: any) => s.id);
+      const ids: string[] = data.items.map((s) => s.id);
       try {
         const entries = await Promise.all(ids.map(async (id) => {
-          const res = await fetch(`${API}/api/jobs/${id}?api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } });
+          const res = await fetch(`/api/proxy/api/jobs/${id}`);
           if (!res.ok) return [id, null] as const;
-          const j = await res.json();
+          const j: Job = await res.json();
           return [id, j] as const;
         }));
-        const map: Record<string, any> = {};
+        const map: Record<string, Job | null> = {};
         for (const [id, j] of entries) map[id] = j;
         setJobs(map);
-        const hasPending = Object.values(map).some((j: any) => j && (j.status === 'queued' || j.status === 'running'));
+        const hasPending = Object.values(map).some((j) => j && (j.status === 'queued' || j.status === 'running'));
         if (auto && hasPending) timer = setTimeout(load, 3000);
-      } catch (_) {}
+      } catch (e) { console.warn('Failed to poll job statuses:', e); }
     };
     load();
     return () => { if (timer) clearTimeout(timer); };
-  }, [JSON.stringify(data?.items), auto]);
+  }, [data, auto]);
 
   const rerun = async (id: string) => {
     try {
@@ -72,65 +181,39 @@ function HomeClient() {
       const payload = j.payload || {};
       const kind = (j.kind || 'web').toLowerCase();
       const path = kind === 'mobile' ? '/api/test/mobile' : '/api/test/web';
-      const res = await fetch(`${API}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY }, body: JSON.stringify(payload) });
+      const res = await fetch(`/api/proxy${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
       const js = await res.json();
       if (!res.ok) throw new Error(JSON.stringify(js));
-      window.location.href = `/sessions/${js.job_id}`;
+      router.push(`/sessions/${js.job_id}`);
     } catch (e: any) { alert('Re-run failed: ' + (e?.message || String(e))); }
   };
 
+  const badge = (st:string) => {
+    const color = st==='failed'?'#fff0f0': st==='completed'?'#f0fff0': st==='running'?'#fffbe6':'#f0f0f0';
+    return (<span style={{ background: color, padding: '2px 6px', borderRadius: 4 }}>{st}</span>);
+  };
   return (
     <div>
-      <section style={{ marginBottom: 12 }}>
-        <label>Kind: 
-          <select value={kind} onChange={e=>setKind(e.target.value)}>
-            <option value="">(all)</option>
-            <option value="web">web</option>
-            <option value="mobile">mobile</option>
-          </select>
-        </label>
-        <label style={{ marginLeft: 12 }}>Status: 
-          <select value={status} onChange={e=>setStatus(e.target.value)}>
-            <option value="">(all)</option>
-            <option value="queued">queued</option>
-            <option value="running">running</option>
-            <option value="completed">completed</option>
-            <option value="failed">failed</option>
-            <option value="canceled">canceled</option>
-          </select>
-        </label>
-        <label style={{ marginLeft: 12 }}>Type: 
-          <select value={testType} onChange={e=>setTestType(e.target.value)}>
-            <option value="">(all)</option>
-            <option value="smoke">smoke</option>
-            <option value="auto">auto</option>
-            <option value="performance">performance</option>
-            <option value="security">security</option>
-            <option value="analyze">analyze</option>
-          </select>
-        </label>
-        <label style={{ marginLeft: 12 }}>Since: <input type="datetime-local" value={since} onChange={e=>setSince(e.target.value)} /></label>
-        <label style={{ marginLeft: 12 }}>Until: <input type="datetime-local" value={until} onChange={e=>setUntil(e.target.value)} /></label>
-        <label style={{ marginLeft: 12 }}>Limit: <input type="number" value={limit} onChange={e=>setLimit(parseInt(e.target.value||"20"))} style={{ width: 60 }} /></label>
-        <button onClick={() => setOffset(0)} style={{ marginLeft: 12 }}>Apply</button>
-        <label style={{ marginLeft: 12 }}><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)} /> Auto-refresh</label>
-      </section>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Filters filterState={filterState} dispatch={dispatch} onApply={() => setOffset(0)} />
+        <label><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Auto-refresh</label>
+      </div>
 
       {loading && <p>Loading…</p>}
       {error && <p style={{ color: 'red' }}>{error}</p>}
 
       <table cellPadding={6} border={1} style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr><th>ID</th><th>Project</th><th>Kind</th><th>Type</th><th>Status</th><th>Perf</th><th>ZAP</th><th>Reports</th><th>Created</th><th>Actions</th></tr>
+          <tr><th>ID</th><th>Project</th><th>Kind</th><th>Type</th><th>Status</th><th>Perf Score</th><th>ZAP Alerts</th><th>Reports</th><th>Created</th><th>Actions</th></tr>
         </thead>
         <tbody>
-        {data?.items?.map((s: any) => {
+        {data?.items?.map((s: Session) => {
           const j = jobs[s.id];
           const status = j?.status || s.status;
-          const badge = (st:string) => {
-            const color = st==='failed'?'#fff0f0': st==='completed'?'#f0fff0': st==='running'?'#fffbe6':'#f0f0f0';
-            return (<span style={{ background: color, padding: '2px 6px', borderRadius: 4 }}>{st}</span>);
-          };
           const perfScore = j?.performance?.performance_score;
           const zap = j?.security?.counts;
           const perfUrl = j?.artifact_urls?.perf_html?.presigned_url;
@@ -141,7 +224,7 @@ function HomeClient() {
               <td>{s.project || ''}</td>
               <td>{s.kind}</td>
               <td>{s.test_type}</td>
-              <td>{badge(status)}</td>
+              <td>{badge(status as string)}</td>
               <td>{typeof perfScore==='number'? perfScore: ''}</td>
               <td>{zap? `H${zap.High||0}/M${zap.Medium||0}/L${zap.Low||0}`: ''}</td>
               <td>
@@ -156,9 +239,9 @@ function HomeClient() {
       </table>
 
       <div style={{ marginTop: 12 }}>
-        <button disabled={offset===0} onClick={()=> setOffset(Math.max(0, offset - limit))}>Prev</button>
+        <button disabled={offset===0} onClick={()=> setOffset(Math.max(0, offset - filterState.limit))}>Prev</button>
         <span style={{ margin: '0 8px' }}>offset: {offset}</span>
-        <button onClick={()=> setOffset(offset + limit)}>Next</button>
+        <button disabled={!data || offset + filterState.limit >= data.total} onClick={()=> setOffset(offset + filterState.limit)}>Next</button>
       </div>
     </div>
   );

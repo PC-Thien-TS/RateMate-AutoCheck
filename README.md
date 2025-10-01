@@ -28,7 +28,43 @@ make run        # report/report-<ts>.html, report/junit-<ts>.xml
 
 ---
 
+
 # RateMate AutoCheck (E2E)
+
+---
+
+## Usage Examples (Quick Reference)
+
+### Run E2E tests (local)
+```bash
+pytest -vv tests/auth tests/smoke/test_routes.py --browser=chromium
+```
+
+### Run with Docker
+```bash
+make build
+make run
+```
+
+### Windows PowerShell
+```powershell
+./make.ps1 build
+./make.ps1 run
+```
+
+### Utilities
+```bash
+# Debug probe
+python tools/debug_probe.py --base https://host --path /login
+
+# Discover routes
+python tools/discover_routes.py --url https://host/login --emit-tests
+
+# Export coverage
+python tools/export_coverage.py --site ratemate --junit report/junit.xml --out report
+```
+
+---
 
 Bộ kiểm thử end-to-end cho **RateMate Store** (hiện tập trung 1 web: `https://store.ratemate.top`) với hai nhóm tính năng chính **Đăng nhập** và **Đăng ký**.
 Sử dụng **Pytest + Playwright** theo mô hình **Page Object Model (POM)**, chạy được cục bộ, Docker và GitHub Actions.

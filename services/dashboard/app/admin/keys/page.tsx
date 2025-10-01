@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+interface ApiKey {
+  id: number;
+  name: string;
+  project: string | null;
+  rate_limit_per_min: number;
+  active: boolean;
+  created_at: string;
+}
 
 export default function KeysAdmin() {
   const [token, setToken] = useState('');
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<ApiKey[]>([]);
   const [name, setName] = useState('pipeline');
   const [project, setProject] = useState('');
   const [rate, setRate] = useState(60);
@@ -16,7 +23,7 @@ export default function KeysAdmin() {
   const load = async () => {
     setErr(null);
     try {
-      const res = await fetch(`${API}/api/admin/keys`, { headers: { 'x-admin-token': token }});
+      const res = await fetch(`/api/proxy/admin/keys`, { headers: { 'x-admin-token': token }});
       if (!res.ok) throw new Error(await res.text());
       const js = await res.json();
       setItems(js.items || []);
@@ -26,7 +33,7 @@ export default function KeysAdmin() {
   const createKey = async () => {
     setErr(null); setCreated(null);
     try {
-      const res = await fetch(`${API}/api/admin/keys`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ name, project, rate_limit_per_min: rate }) });
+      const res = await fetch(`/api/proxy/admin/keys`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ name, project, rate_limit_per_min: rate }) });
       const js = await res.json();
       if (!res.ok) throw new Error(js?.detail || JSON.stringify(js));
       setCreated(js.api_key);
@@ -37,7 +44,7 @@ export default function KeysAdmin() {
   const toggleActive = async (id: number, active: boolean) => {
     setErr(null);
     try {
-      const res = await fetch(`${API}/api/admin/keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ active }) });
+      const res = await fetch(`/api/proxy/admin/keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ active }) });
       if (!res.ok) throw new Error(await res.text());
       await load();
     } catch (e:any) { setErr(e?.message || String(e)); }
@@ -46,7 +53,7 @@ export default function KeysAdmin() {
   const updateRate = async (id: number, rate: number) => {
     setErr(null);
     try {
-      const res = await fetch(`${API}/api/admin/keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ rate_limit_per_min: rate }) });
+      const res = await fetch(`/api/proxy/admin/keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-admin-token': token }, body: JSON.stringify({ rate_limit_per_min: rate }) });
       if (!res.ok) throw new Error(await res.text());
       await load();
     } catch (e:any) { setErr(e?.message || String(e)); }
@@ -72,7 +79,7 @@ export default function KeysAdmin() {
       <table cellPadding={6} border={1} style={{ borderCollapse:'collapse', width:'100%' }}>
         <thead><tr><th>ID</th><th>Name</th><th>Project</th><th>Rate/min</th><th>Active</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>
-          {items.map((k:any) => (
+          {items.map((k) => (
             <tr key={k.id}>
               <td>{k.id}</td>
               <td>{k.name}</td>

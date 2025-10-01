@@ -48,6 +48,26 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+  jobs:
+    lint:
+      name: Lint & Type Check
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
+        - name: Install lint/type-check deps
+          run: |
+            python -m pip install --upgrade pip
+            pip install flake8 black mypy
+        - name: Run Black (check only)
+          run: black --check .
+        - name: Run Flake8
+          run: flake8 .
+        - name: Run MyPy
+          run: mypy .
+
 env:
   SITE_INPUT: ${{ github.event.inputs.site }}
   BASE_URL_INPUT: ${{ github.event.inputs.base_url }}

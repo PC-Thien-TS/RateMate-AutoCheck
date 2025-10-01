@@ -14,9 +14,10 @@ repos:
     hooks:
       - id: black
 
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
     hooks:
-      - id: flake8
-        additional_dependencies: []
+      - id: detect-secrets
 

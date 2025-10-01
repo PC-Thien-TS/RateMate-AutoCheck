@@ -2,9 +2,6 @@
 
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || 'dev-key';
-
 export default function DiffPage({ params, searchParams }: { params: { id: string }, searchParams: any }) {
   const id = params.id;
   const l = parseInt(searchParams?.l || '0', 10);
@@ -18,8 +15,8 @@ export default function DiffPage({ params, searchParams }: { params: { id: strin
       try {
         setErr(null);
         const [a, b] = await Promise.all([
-          fetch(`${API}/api/results/${l}`, { headers: { 'x-api-key': API_KEY }}).then(r=>r.json()),
-          fetch(`${API}/api/results/${r}`, { headers: { 'x-api-key': API_KEY }}).then(r=>r.json()),
+          fetch(`/api/proxy/results/${l}`).then(r=>r.json()),
+          fetch(`/api/proxy/results/${r}`).then(r=>r.json()),
         ]);
         setLeft(a); setRight(b);
       } catch (e: any) { setErr(String(e)); }

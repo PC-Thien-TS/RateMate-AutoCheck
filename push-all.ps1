@@ -5,7 +5,8 @@ Param(
   [switch]$NoFixRemotes,
   [switch]$Mirror,
   [string]$BitBranch,
-  [string]$Branch
+  [string]$Branch,
+  [string]$DestBranch = "dev"
 )
 
 # NOTE: do NOT use parameter name `$args`/`$Args` because it's a PS automatic var
@@ -46,8 +47,14 @@ if (-not $NoFixRemotes) {
       foreach ($u in $distinct) {
         if ($u -ne $originFetch) {
           # Treat non-fetch URL as secondary (likely Bitbucket). Ensure separate 'bitbucket' remote.
-          $bbExisting = (& git remote get-url bitbucket 2>$null)
-          if (-not $bbExisting) {
+          $remotes = (& git remote)
+          $remoteExists = $false
+          foreach ($r in $remotes) {
+            if (((& git remote get-url $r 2>$null).Trim()) -eq $u) {
+              $remoteExists = $true; break
+            }
+          }
+          if (-not $remoteExists) {
             Write-Host "Creating 'bitbucket' remote -> $u" -ForegroundColor Yellow
             TryRun @('remote','add','bitbucket',$u)
           }
@@ -135,31 +142,30 @@ if (-not $hasUpstream) {
 
 # Also push to 'bitbucket' remote if present (explicit), ignore errors
 $bbUrl = (& git remote get-url bitbucket 2>$null)
-if ($bbUrl) {
-  if ($Mirror) {
-    Write-Host "Mirroring to bitbucket (branches/tags, prune)" -ForegroundColor Yellow
-    TryRun @('push','--mirror','--prune','bitbucket')
-  } else {
-    Write-Host "Pushing to bitbucket remote as well" -ForegroundColor Yellow
-    if ([string]::IsNullOrWhiteSpace($BitBranch)) {
-      TryRun @('push','bitbucket',$current)
-    } else {
-      # Push current HEAD to a specific branch name on Bitbucket
-      TryRun @('push','bitbucket',"${current}:${BitBranch}")
-    }
-    # Print a handy PR URL to target 'dev' on Bitbucket
-    try {
-      $bbRemoteUrl = (& git remote get-url bitbucket 2>$null).Trim()
-      $slug = $null
-      if ($bbRemoteUrl -match 'bitbucket\.org[:/]+(.+?)(\.git)?$') { $slug = $Matches[1] }
-      if ($slug) {
-        $src = if ([string]::IsNullOrWhiteSpace($BitBranch)) { $current } else { $BitBranch }
-        $pr = "https://bitbucket.org/$slug/pull-requests/new?source=$src&dest=dev"
-        Write-Host "Create PR to dev: $pr" -ForegroundColor Green
-      }
-    } catch {}
+if ($Mirror) {
+  if ($bbUrl) {
+    Write-Host "Mirroring all branches and tags to 'bitbucket' remote (with prune)..." -ForegroundColor Yellow
+    TryRun @('push', '--mirror', '--prune', 'bitbucket')
   }
-} else {
+  # You could add mirroring to other remotes here if needed
+} elseif ($bbUrl) {
+  Write-Host "Pushing to 'bitbucket' remote..." -ForegroundColor Yellow
+  $targetBranch = if ([string]::IsNullOrWhiteSpace($BitBranch)) { $current } else { $BitBranch }
+  $refSpec = if ($targetBranch -eq $current) { $current } else { "${current}:${targetBranch}" }
+  TryRun @('push', 'bitbucket', $refSpec)
+
+  # Print a handy PR URL to target a specific destination branch on Bitbucket
+  try {
+    $bbRemoteUrl = $bbUrl.Trim()
+    $slug = $null
+    if ($bbRemoteUrl -match 'bitbucket\.org[:/]+(.+?)(\.git)?$') { $slug = $Matches[1] }
+    if ($slug) {
+      $prUrl = "https://bitbucket.org/$slug/pull-requests/new?source=$targetBranch&dest=$DestBranch"
+      Write-Host "Create PR to '$DestBranch': $prUrl" -ForegroundColor Green
+    }
+  } catch {}
+}
+else {
   # If origin had extra push-URLs, recommend using separate 'bitbucket' remote
   $originPushAll = (& git remote get-url --push origin --all 2>$null)
   if ($originPushAll -and ($originPushAll -split "`n").Count -gt 1) {

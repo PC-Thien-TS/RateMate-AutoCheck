@@ -36,8 +36,6 @@ services:
       - "8000:8000"
     depends_on:
       - redis
-      - perf
-      - zap
       - postgres
     restart: unless-stopped
     develop:
@@ -71,6 +69,9 @@ services:
       # Auto-accept baseline when missing (1 to enable)
       - VISUAL_AUTO_BASELINE=${VISUAL_AUTO_BASELINE:-0}
       - ARTIFACT_TTL_SECONDS=86400
+      # MobSF static analyzer (optional but recommended for mobile analyze)
+      - MOBSF_URL=${MOBSF_URL:-http://mobsf:8000}
+      - MOBSF_API_KEY=${MOBSF_API_KEY:-}
       # Thresholds (optional)
       # - PERF_SCORE_MIN=80
       # - PERF_LCP_MAX_MS=2500
@@ -87,6 +88,7 @@ services:
       - zap
       - postgres
       - minio
+      - mobsf
     restart: unless-stopped
     develop:
       watch:
@@ -99,6 +101,8 @@ services:
       args:
         - NEXT_PUBLIC_API_KEY=${NEXT_PUBLIC_API_KEY:-dev-key}
     environment:
+      - API_GATEWAY_URL=http://api:8000
+      - DASH_API_KEY=${NEXT_PUBLIC_API_KEY:-dev-key}
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_API_KEY=${NEXT_PUBLIC_API_KEY:-dev-key}
       - NEXT_PUBLIC_S3_PUBLIC=http://localhost:9000
@@ -159,6 +163,15 @@ services:
     volumes:
       - minio:/data
 
+  mobsf:
+    image: opensecurity/mobile-security-framework-mobsf:latest
+    ports:
+      - "8002:8000"   # Host 8002 -> Container 8000
+    environment: {}
+    volumes:
+      - mobsfdata:/root/.MobSF
+
 volumes:
   pgdata: {}
   minio: {}
+  mobsfdata: {}

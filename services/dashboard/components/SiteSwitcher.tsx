@@ -3,17 +3,19 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from 'next/navigation';
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "dev-key";
+interface Project {
+  project: string;
+  sessions: number;
+}
 
 export default function SiteSwitcher() {
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const searchParams = useSearchParams();
   const router = useRouter();
   const currentProject = searchParams.get('project') || '';
 
   useEffect(() => {
-    fetch(`${API}/api/projects?api_key=${encodeURIComponent(API_KEY)}`, { headers: { 'x-api-key': API_KEY } })
+    fetch(`/api/proxy/api/projects`)
       .then(r => r.json())
       .then(js => setProjects(js.items || []))
       .catch((e) => { console.warn('Failed to fetch projects', e) });
@@ -34,7 +36,7 @@ export default function SiteSwitcher() {
       Site: 
       <select value={currentProject} onChange={e => handleSiteChange(e.target.value)} style={{ marginLeft: 4 }}>
         <option value="">(all)</option>
-        {projects.map((p: any) => (
+        {projects.map((p) => (
           <option key={p.project} value={p.project}>{p.project} ({p.sessions})</option>
         ))}
       </select>

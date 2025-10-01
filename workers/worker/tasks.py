@@ -308,6 +308,26 @@ def run_web_test(job_id: str, payload: Dict):
     case_results = []
     all_passed = True
     s3cfg = _s3_config()
+    visual_threshold: float | None = None
+
+    def _upload(path: Path) -> dict | None:
+        if not path:
+            return None
+        return _upload_artifact(job_id, path, s3cfg)
+
+    def _download_baseline(key: str, dest: Path) -> bool:
+        return _download_from_s3(key, dest, s3cfg)
+
+    def _push_baseline(source: Path, key: str) -> None:
+        cli = _make_s3_client(s3cfg)
+        if not cli:
+            return
+        try:
+            _ensure_bucket(cli, s3cfg.get('bucket'))
+            cli.upload_file(str(source), s3cfg.get('bucket'), key)
+        except Exception:
+            pass
+
     t0 = time.time()
     if _is_canceled(job_id):
       _update(job_id, {"status": "canceled", "error": "canceled"}); return
@@ -372,6 +392,7 @@ def run_web_test(job_id: str, payload: Dict):
                     auto_base = os.getenv('VISUAL_AUTO_BASELINE','0') == '1'
                     # Allow both names; default 2.0 (%)
                     threshold = float(os.getenv('VISUAL_MAX_MISMATCH_PCT', os.getenv('VISUAL_THRESHOLD_PCT', '2.0')))
+                    visual_threshold = threshold
                     if has_baseline:
                         try:
                             from PIL import Image, ImageChops  # pillow
@@ -404,6 +425,7 @@ def run_web_test(job_id: str, payload: Dict):
                         'mismatch_pct': mismatch,
                         'passed': passed_visual,
                         'diff_image': str(diff_path) if diff_path.exists() else None,
+                        'threshold_pct': threshold,
                     }
                 except Exception:
                     visual = None
@@ -581,25 +603,6 @@ def run_web_test(job_id: str, payload: Dict):
             zap_result = {"error": str(e)}
             zap_ok = False
 
-    # Upload helpers (shared with mobile)
-    def _upload(path: Path) -> dict | None:
-        if not path:
-            return None
-        return _upload_artifact(job_id, path, s3cfg)
-
-    def _download_baseline(key: str, dest: Path) -> bool:
-        return _download_from_s3(key, dest, s3cfg)
-
-    def _push_baseline(source: Path, key: str) -> None:
-        cli = _make_s3_client(s3cfg)
-        if not cli:
-            return
-        try:
-            _ensure_bucket(cli, s3cfg.get('bucket'))
-            cli.upload_file(str(source), s3cfg.get('bucket'), key)
-        except Exception:
-            pass
-
     # For single URL keep backward-compatible shape
     if len(urls) == 1:
         r0 = case_results[0]
@@ -617,7 +620,7 @@ def run_web_test(job_id: str, payload: Dict):
             "error": r0.get("error"),
             "performance": perf_result,
             "security": zap_result,
-            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None, "visual_ok": r0.get('visual',{}).get('passed') if r0.get('visual') else None, "visual_threshold_pct": threshold if 'threshold' in locals() else None},
+            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None, "visual_ok": r0.get('visual',{}).get('passed') if r0.get('visual') else None, "visual_threshold_pct": visual_threshold},
         }
     else:
         result = {
@@ -627,7 +630,7 @@ def run_web_test(job_id: str, payload: Dict):
             "duration_sec": elapsed,
             "performance": perf_result,
             "security": zap_result,
-            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None, "visual_threshold_pct": threshold if 'threshold' in locals() else None},
+            "policy": {"performance_ok": perf_ok, "performance_reasons": perf_reason or None, "security_ok": zap_ok, "security_reasons": zap_reason or None, "visual_threshold_pct": visual_threshold},
         }
     out_path = RESULTS_DIR / f"{job_id}-result.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -912,4 +915,5 @@ def _mobile_analyze_mobsf(payload: Dict, job_id: str) -> Dict:
     finally:
         for tmp in temp_files:
             _cleanup_path(tmp)
+
 
